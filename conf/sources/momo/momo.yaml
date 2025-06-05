@@ -1,0 +1,84 @@
+# Pipeline Specific Configuration for: AIR_CDR_Processing
+# Contains detailed data structure, validation, and transformation logic.
+
+pipelineName: "MoMo" # For reference and validation
+
+# Detailed configurations for each source defined in the main framework file
+sourcesDetails:
+  - sourceId: "MoMo" # Must match sourceId in main config
+    # Path to the metadata file describing the source data structure
+    sourceMetadata: "metadata/air_md.csv"
+    # Comma-separated list of all source field names
+    sourceFields: "opco_id, structure_version, cdr_type_main, cdr_type_1, unique_record_identifier, Originnodetype, nodetype_other1, Originhostname, Originfileid, Origintransactionid, Originoperatorid, Origintimestamp, Hostname, Localsequencenumber, timestamp_v, timestamp_other1, Currentserviceclass, serviceclass_other, Voucherbasedrefill, Transactiontype, Transactioncode, Transactionamount, Transactioncurrency, refill_details, refilltype_type1, refilltype_type2, voucher_details, Accountnumber, accountnumber_other1, accountnumber_other2, Accountcurrency, Subscribernumber, subscribernumber_other1, subscribernumber_other2, promotionannouncementcode, accountinformationbeforerefill, accountinformationafterrefill, refillpromodivisionamount, refilllifecycle_details, Welcomestatus, promotionplanallocstartdate, Accountgroupid, externaldata_details, Locationnumber, Accountcurrencycleared, ignoreserviceclasshierarchy, Selectiontreeparameter, Treedefinedfields, Accounthomeregion, Subscriberregion, promotionplanallocenddate, Requestedrefilltype, requestedrefilltype_other1, requestedrefilltype_other2, requestedrefilltype_other3, Cellidentifier, Supplierid, Pamtriggered, das_rraccountinformationbeforerefill, das_rraccountinformationafterrefill, Subdedicatedaccountsbeforerefill, subdedicatedaccountsafterrefill, usaccu_accountinformationbeforerefil, usaccu_accountinformationafterrefill, community_details, Offeraccountinformationbeforerefill, Offeraccountinformationafterrefill, Offerbeforedas, Offerbeforesubdas, Offerafterdas, Offeraftersubdas, Offerattributeinformationbefore, offerattributeinformationafter, offers_other1, offers_other2, Aggregatedbalance, aggregatedbalance_other, promotionamountconverted, promotiondivisionamount, account_details, Usageaccumulator, externaldata_details1, das_details, subdas_opdetails, Activationdate, Accountdivisionid, Serviceoffering, Accountbalancebefore, Operation, Refillfraudcounter, Refillunbartimestamp, Errorcode, errorcode_other1, errorcode_other2, Msisdncurrent, Msisdnnew, Imsicurrent, Imsinew, Naicurrent, Nainew, Sipuricurrent, Sipurinew, Privatecurrent, Privatenew, Cleanupdate, Msisdnchange, Externaladdresschange, Adjustmentamount, negativebalancebarringdate, creditclearanceperiodbefore, creditclearanceperiodafter, servicefee_details, Cdrrecordcount, extra1, extra2, extra3, extra4, extra5, extra6, extra7, extra8, extra9, extra10, username, event_timestamp_enrich, rec_seq_no, file_name, event_date"
+    # Record and field validation rules for this source
+    validationRules:
+      maxRecordLength: 10000
+      defaultMaxFieldSize: 125
+      fieldValidations:
+        - fieldName: "opco_id"
+          validations:
+            - expression: "validationLib.isNotNull($opco_id)"
+              errorMessage: "Opco ID must not be null."
+            - expression: "validationLib.matchesRegex($opco_id, '^\\d{3}$')"
+              errorMessage: "Opco ID must be a 3-digit number."
+        - fieldName: "unique_record_identifier"
+          validations:
+            - expression: "validationLib.hasMinLength($unique_record_identifier, 10)"
+              errorMessage: "Unique record identifier must be at least 10 characters."
+            - expression: "validationLib.hasMaxLength($unique_record_identifier, 50)"
+              errorMessage: "Unique record identifier must not exceed 50 characters."
+        - fieldName: "Transactionamount"
+          validations:
+            - expression: "validationLib.isNumeric($Transactionamount)"
+              errorMessage: "Transaction amount must be a valid number."
+            - expression: "validationLib.isGreaterThanOrEqual($Transactionamount, 0)"
+              errorMessage: "Transaction amount must be a non-negative number."
+        - fieldName: "Origintimestamp"
+          validations:
+            - expression: "validationLib.isValidDateTimeFormat($Origintimestamp, 'yyyyMMddHHmmss')"
+              errorMessage: "Origin timestamp must be in yyyyMMddHHmmss format."
+        - fieldName: "cdr_type_main"
+          validations:
+            - expression: "validationLib.isInAllowedSet($cdr_type_main, ['1', '2', '3', 'S', 'V', 'M'])"
+              errorMessage: "CDR Type Main contains an invalid value."
+
+# Output configurations for this pipeline
+outputs:
+  - outputId: "AIR_FactTable_Output"
+    outputType: "FactTable"
+    active: true
+    # Enriched fields are implicitly defined by the output of transformations
+    # or can be explicitly listed if some pass through directly.
+    transformations:
+      - transformationName: "DeriveEventDateTimeUTC"
+        type: "customFunction"
+        expression: "event_datetime_utc = dateTimeLib.convertToUTC($Origintimestamp, 'yyyyMMddHHmmss', 'Africa/Kampala')"
+      - transformationName: "DescribeCdrType"
+        type: "customFunction"
+        expression: "cdr_description = mappingLib.lookupCdrDescription($cdr_type_main, 'Unknown CDR Type')"
+      - transformationName: "ConvertTransactionCurrency"
+        type: "customFunction"
+        expression: "transaction_amount_usd = financeLib.convertToUSD($Transactionamount, $Transactioncurrency, $SYS_PROCESSING_DATE$)"
+      - transformationName: "NormalizeHostname"
+        type: "customFunction"
+        expression: "normalized_origin_hostname = stringLib.toLowerCase($Originhostname)"
+      - transformationName: "CreateFactPrimaryKey"
+        type: "customFunction"
+        expression: "fact_table_pk = cryptoLib.generateSHA256Key($unique_record_identifier, $Origintimestamp, $opco_id, '|')"
+
+    deleteIntermediateFilesOnLoad: true
+    loadToDatabase: true
+    keepFileHeaderOnLoad: true # If loading from an intermediate transformed file
+    databaseConnectionRef: "local_pg_main" # DB for the final fact table
+    tableName: "air_trans_fct"
+
+  - outputId: "AIR_Matrix_Output"
+    outputType: "Matrix"
+    active: true
+    matrixName: "air_cdr_summary_matrix"
+    # These fields would typically come from the already transformed data
+    measures: "transaction_amount_usd"
+    dimensions: "dateTimeLib.getDatePart(event_datetime_utc), cdr_description, normalized_origin_hostname"
+    loadToDatabase: true
+    databaseConnectionRef: "local_pg_main"
+    tableName: "air_cdr_matrix_info"

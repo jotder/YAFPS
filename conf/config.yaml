@@ -1,0 +1,128 @@
+# Main ETL Framework Configuration
+# Global configurations and pipeline orchestration
+
+# List of all database connection configurations
+databaseConnections:
+  - connectionName: "local_pg_main"
+    type: "PostgreSQL"
+    dbUrl: "jdbc:postgresql://localhost:5432/postgres"
+    dbUser: "postgres"
+    dbPass: "postgres"
+    maxPool: 10
+    idleTimeout: 30000
+    connTimeout: 5000
+    maxLifetime: 1800000
+  - connectionName: "office_vpn_pg_ucc"
+    type: "PostgreSQL"
+    dbUrl: "jdbc:postgresql://192.168.1.22:5444/UCC_Uganda"
+    dbUser: "postgres"
+    dbPass: "postgres"
+    maxPool: 50
+  # ... other database connections ...
+  - connectionName: "prod_data_warehouse"
+    type: "PostgreSQL"
+    dbUrl: "jdbc:postgresql://dw.example.com:5432/analytics_db"
+    dbUser: "etl_user"
+    dbPass: "SecurePassword123!"
+    maxPool: 20
+
+# List of all ETL pipelines defined in this framework
+etlPipelines:
+  # Pipeline 1: AIR Data Processing
+  - pipelineName: "AIR_CDR_Processing"
+    description: "Processes AIR Call Detail Records."
+    pipelineVersion: "1.5"
+    active: true # Initial active state for the pipeline
+    logFile: "logs/air_cdr_pipeline.log"
+    statusDir: "status/air_cdr"
+    fileInfoTable: "pipeline_air_process_info"
+    routeInfoTable: "pipeline_air_route_info"
+
+    # Path to the detailed configuration file for this pipeline
+    pipelineSpecificConfigFile: "sources/air/air.yaml"
+
+    # Core source configurations needed for discovery and initial setup
+    sources:
+      - sourceId: "AIR"
+        active: true # Controls if this source within the pipeline is processed
+        sourceDir: "data/air/source"
+        dirFilter: "glob:*"
+        startDir: "0"
+        endDir: "z"
+        dataFileType: "CSV"
+        fileFilter: "glob:*.csv"
+        fileBackup: true
+        deleteAfterLoad: false # From source dir before staging DB load
+        backupDir: "data/air/backup"
+        errBackup: true
+        errDir: "data/air/error"
+        outDir: "data/air/output_temp" # For intermediate files if any
+        useSubDirAsPartition: true
+        headerLines: 0
+        # Initial values, can be changed by performanceTuning
+        numThreads: 5
+        batchSize: 50
+        # Staging database details
+        loadFiles: true # Load raw files to a staging table
+        databaseConnectionRef: "local_pg_main"
+        tableName: "air_trans_raw_staging" # Staging table name
+        keepFileHeader: true
+        deleteFilesOnLoadAfterDb: true # From source dir after successful staging DB load
+        # (Moved to pipeline-specific file: sourceMetadata, sourceFields, validationRules)
+
+    # Configuration for dynamic performance tuning (remains in main config)
+    autoTuning:
+      enabled: true
+      observationFrequencySeconds: 60
+      cooldownPeriodSeconds: 300
+      adjustableParameters:
+        numThreads: { min: 1, max: 8, incrementStep: 1, decrementStep: 1 }
+        batchSize: { min: 10, max: 200, incrementFactor: 1.2, decrementFactor: 0.8 }
+      tuningRules:
+        - ruleName: "CriticalCPUHigh"
+          metric: "systemCpuLoadPercent"
+          condition: "greaterThan"
+          threshold: 90
+          consecutiveBreachesToTrigger: 2
+          action: { type: "deactivatePipelineTemporarily", durationMinutes: 15, interimAction: { type: "reduceLoadDrastically", params: { targetNumThreads: "min", targetBatchSizeFactor: 0.5 } } }
+        # ... other tuning rules ...
+
+  # Pipeline 2: MFS Transaction Processing
+  - pipelineName: "MoMo"
+    description: "Processes Mobile Money (MoMo) transaction logs."
+    pipelineVersion: "1.0"
+    active: true
+    logFile: "logs/momo.log"
+    statusDir: "status/mfs"
+    # ... other high-level MFS pipeline settings ...
+
+    pipelineSpecificConfigFile: "sources/momo/momo.yaml"
+
+    sources:
+    - sourceId: "MoMo"
+      active: true # Controls if this source within the pipeline is processed
+      sourceDir: "data/momo/source"
+      dirFilter: "glob:*"
+      startDir: "20191130"
+      endDir: "20250301"
+      dataFileType: "CSV"
+      fileFilter: "regex:momo_cdr_\\d+_\\d{8}\\.csv(\\.gz)?"
+      fileBackup: true
+      deleteAfterLoad: false # From source dir before staging DB load
+      backupDir: "data/momo/backup"
+      errBackup: true
+      errDir: "data/momo/error"
+      outDir: "data/momo/output_temp" # For intermediate files if any
+      useSubDirAsPartition: true
+      headerLines: 0
+      # Initial values, can be changed by performanceTuning
+      numThreads: 5
+      batchSize: 50
+      # Staging database details
+      loadFiles: true # Load raw files to a staging table
+      databaseConnectionRef: "local_pg_main"
+      tableName: "momo_trans_raw_staging" # Staging table name
+      keepFileHeader: true
+      deleteFilesOnLoadAfterDb: true # From source dir after successful staging DB load
+      # (Moved to pipeline-specific file: sourceMetadata, sourceFields, validationRules)
+      # performanceTuning: ... (can be defined for MFS as well)

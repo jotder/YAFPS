@@ -1,0 +1,10 @@
+
+{
+  "regex": "^(.*?)_(\\d+)_(\\d{8})\\.csv\\.([a-zA-Z]+)$",
+  "fields": [
+    "prefix",
+    "number",
+    "date",
+    "extension"
+  ]
+}
