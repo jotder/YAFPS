@@ -1,10 +1,12 @@
 package org.gamma.datasources;
 
 import org.gamma.config.YamlSourceConfigAdapter;
-import org.gamma.processing.BatchProcessor;
+import org.gamma.metrics.FileInfo; // Added import
+import org.gamma.processing.AbstractBatchFileParser; // Changed import
 import org.gamma.processing.StatusWriter;
 
 import java.io.IOException;
+import java.sql.Timestamp; // Added import
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -18,7 +20,7 @@ import java.util.Map;
 /**
  * Simulates loading a file with potential delays and failures.
  */
-public class AIRFileParser extends BatchProcessor {
+public class AIRFileParser extends AbstractBatchFileParser { // Changed superclass
 
     DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     DateTimeFormatter eventDateFmt = DateTimeFormatter.ofPattern("yyyy-MM-dd");
@@ -26,17 +28,25 @@ public class AIRFileParser extends BatchProcessor {
 
     public AIRFileParser(YamlSourceConfigAdapter config) throws IOException {
         super(config);
-        logger = this.configureLogger(config.sourceName() + "LOG_FILE");
+        // Explicitly use super to access logger if there's any doubt,
+        // or assign directly if it's confirmed protected and accessible.
+        // this.logger should work if protected and in superclass.
+        this.logger = super.configureLogger(config.sourceName() + "LOG_FILE"); // or FileParser.super.configureLogger
         this.statusHandler = new StatusWriter(config.fileInfo(), config.routeInfo(), this.logger);
-
     }
 
-    public synchronized StatusWriter getStatusHandler() {
+    // Removed duplicate getStatusHandler. The @Override one below is correct.
+    // public synchronized StatusWriter getStatusHandler() {
+    //     return this.statusHandler;
+    // }
+
+    @Override
+    public StatusWriter getStatusHandler() { // Removed synchronized
         return this.statusHandler;
     }
 
     @Override
-    public String createOutFileName(List<Path> paths) {
+    public String createOutFileName(List<Path> paths) { // Added @Override
         String[] n1 = paths.getFirst().getFileName().toFile().getName().split("_");
         String n2 = paths.getLast().toFile().getName().split("_")[2];
         return n1[0] + "_" + n1[1] + "_" + n1[2] + ".." + n2 + "_" + n1[3].substring(0, n1[3].indexOf(".")) + ".csv";
@@ -115,7 +125,51 @@ public class AIRFileParser extends BatchProcessor {
 //        }
 //        // No need to return failed metrics here, exception propagation handles it.
 //    }
-    @Override
+
+    @Override // Uncommented and added Override
+    public FileInfo parseFile(Path filePath) throws InterruptedException {
+        final String stageName = "Parsing " + filePath.getFileName() + " to "; // Simplified Paths.get().getFileName()
+
+        final Instant loadStart = Instant.now();
+        final String threadName = Thread.currentThread().getName();
+
+        try {
+            Thread.sleep(SIMULATED_LOAD_DURATION);
+
+            if (filePath.hashCode() % SIMULATED_LOAD_FAILURE_MODULO == 0)
+                throw new RuntimeException("Simulated DB connection error for " + filePath);
+
+            String fileName = filePath.toFile().getName();
+            // Assuming FileInfo is org.gamma.metrics.FileInfo
+            // Ensure constructor matches or adapt
+            return new org.gamma.metrics.FileInfo(
+                    org.gamma.util.Utils.getFileID(config.sourceName(), fileName), // fileID
+                    config.sourceName(), // dataSource
+                    fileName, // fileName
+                    filePath.toFile().length(), // fileSize
+                    Timestamp.from(Instant.ofEpochMilli(filePath.toFile().lastModified())), // lastModTs
+                    // filePath.toString(), // This was sourceFileUrl, FileInfo doesn't have it.
+                    0L, // recCount
+                    0L, // failCount
+                    "SOURCE", // fileType
+                    "PARSE", // task
+                    Timestamp.from(loadStart), // startTs
+                    Duration.between(loadStart, Instant.now()).toMillis(), // duration
+                    org.gamma.metrics.Status.PASS, // status placeholder
+                    "recordStart_placeholder", // recordStart placeholder
+                    "recordEnd_placeholder",   // recordEnd placeholder
+                    null           // message
+            );
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw e;
+        } catch (RuntimeException e) {
+            // Let BatchProcessor handle creating failed metrics from the exception
+            throw e;
+        }
+    }
+
+    @Override // Added @Override
     protected String getPartition(Map<String, Object> rec) {
         return "";
     }
@@ -291,6 +345,7 @@ public class AIRFileParser extends BatchProcessor {
 //        return list;
 //    }
 //
+    @Override // Added @Override
     public Map<String, Object> enrich(List<String> fields, long recIndex, String fileName) throws Exception {
         Map<String, Object> rec = new LinkedHashMap<>();
 //        Map<String, FieldMetadata> metaData = config.getSourceMD();

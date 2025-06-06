@@ -9,6 +9,8 @@ import org.gamma.config.AppConfig;
 import org.gamma.config.ConfigManager;
 import org.gamma.config.EtlPipelineItem;
 import org.gamma.config.SourceItem;
+import org.gamma.metrics.MetricsManager;
+import static org.gamma.metrics.MetricsManager.*; // Import all static members
 
 import java.io.IOException;
 import java.io.RandomAccessFile;
@@ -44,50 +46,16 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class YAFPF {
 
     // --- Constants ---
-    private static final int SIMULATED_PROCESSING_FAILURE_MODULO = 10; // Fail processing every Nth batch
-    private static final int SIMULATED_LOAD_FAILURE_MODULO = 5;      // Fail load pseudo-randomly based on hash
-    private static final Duration SIMULATED_LOAD_DURATION = Duration.ofMillis(150); // Reduced sleep for demo
-    private static final Duration SHUTDOWN_WAIT_TIMEOUT = Duration.ofSeconds(60);
+    public static final int SIMULATED_PROCESSING_FAILURE_MODULO = 10; // Fail processing every Nth batch
+    public static final int SIMULATED_LOAD_FAILURE_MODULO = 5;      // Fail load pseudo-randomly based on hash
+    public static final Duration SIMULATED_LOAD_DURATION = Duration.ofMillis(150); // Reduced sleep for demo
+    private static final Duration SHUTDOWN_WAIT_TIMEOUT = Duration.ofSeconds(60); // This can remain private
 
     // --- Configuration Data Holder (Hypothetical - would be in com.gamma.config.EtlPipelineItem) ---
     // This is a placeholder to illustrate the structure FFPF now expects.
     // In a real setup, FFPF would import com.gamma.config.EtlPipelineItem.
 
-    // --- Status Enum ---
-    enum Status {
-        PASS, FAIL, PARTIAL
-    }
-
-    // --- Helper Interface for Status ---
-    private interface HasStatus {
-        Status status();
-    }
-
-    // --- Metrics ---
-    record LoadInfo(String fileName, String targetTable, Status status, Duration duration, String threadName,
-                    Throwable failureCause) implements HasStatus {
-    }
-
-    record BatchInfo(int microBatchId, String batchName, Status status, Duration duration, String threadName,
-                     Throwable failureCause, List<LoadInfo> loadInfo) implements HasStatus {
-    }
-
-    record DataSourceInfo(String sourceId, String sourceName, Status status, Duration duration, String threadName,
-                          List<PartitionInfo> partitionInfo, Throwable failureCause) implements HasStatus {
-        DataSourceInfo(String sourceId, String sourceName, Status status, Duration duration, String threadName, List<PartitionInfo> partitionMetrics) {
-            this(sourceId, sourceName, status, duration, threadName, partitionMetrics, null);
-        }
-    }
-
-    public record ExecutionInfo(Duration totalDuration, List<DataSourceInfo> dataSourceInfo) {
-    }
-
-    record PartitionInfo(String sourceId, String partitionId, Status status, Duration duration, String threadName,
-                         List<BatchInfo> batchMetrics, Throwable failureCause) implements HasStatus {
-        PartitionInfo(String sourceId, String partitionId, Status status, Duration duration, String threadName, List<BatchInfo> batchMetrics) {
-            this(sourceId, partitionId, status, duration, threadName, batchMetrics, null);
-        }
-    }
+    // Metrics-related records and enums have been moved to MetricsManager.java
 
     // --- Class Members ---
     private final AppConfig sourceConfigs; // Uses the new EtlPipelineItem
@@ -116,27 +84,27 @@ public class YAFPF {
     }
 
     // --- Entry Point ---
-    public ExecutionInfo execute() throws InterruptedException {
+    public MetricsManager.ExecutionInfo execute() throws InterruptedException { // Use MetricsManager type
         final Instant executionStart = Instant.now();
-        final List<DataSourceInfo> finalDataSourceMetrics;
+        final List<MetricsManager.DataSourceInfo> finalDataSourceMetrics; // Use MetricsManager type
 
         final int dataSourceConcurrency = Math.max(1, getSources().size());
         final ThreadFactory dataSourceFactory = createPlatformThreadFactory("DataSource-");
         final ExecutorService dataSourceExecutor = Executors.newFixedThreadPool(dataSourceConcurrency, dataSourceFactory);
-        final List<CompletableFuture<DataSourceInfo>> dataSourceFutures = new ArrayList<>();
+        final List<CompletableFuture<MetricsManager.DataSourceInfo>> dataSourceFutures = new ArrayList<>(); // Use MetricsManager type
 
         System.out.printf("Starting execution with %d concurrent data sources.%n", dataSourceConcurrency);
 
         try {
             for (final EtlPipelineItem config : getSources()) { // Iterates over EtlPipelineItem
-                final CompletableFuture<DataSourceInfo> dataSourceFuture = CompletableFuture.supplyAsync(
+                final CompletableFuture<MetricsManager.DataSourceInfo> dataSourceFuture = CompletableFuture.supplyAsync( // Use MetricsManager type
                         () -> {
                             try {
                                 return processDataSource(config); // Passes EtlPipelineItem
                             } catch (final RuntimeException e) {
                                 System.err.printf("!!! Uncaught RuntimeException processing data source %s: %s%n", config.pipelineName(), e.getMessage());
                                 e.printStackTrace(System.err);
-                                return createFailedDataSourceMetrics(config, e); // Passes EtlPipelineItem
+                                return MetricsManager.createFailedDataSourceMetrics(config, e); // Use MetricsManager method
                             }
                         },
                         dataSourceExecutor
@@ -149,10 +117,11 @@ public class YAFPF {
         }
 
         System.out.println("All data source tasks completed or failed.");
-        return new ExecutionInfo(Duration.between(executionStart, Instant.now()), List.copyOf(finalDataSourceMetrics));
+        return new MetricsManager.ExecutionInfo(Duration.between(executionStart, Instant.now()), List.copyOf(finalDataSourceMetrics)); // Use MetricsManager type
     }
 
-    private DataSourceInfo processDataSource(final EtlPipelineItem conf) {
+    // TODO: Move this method to DataSourceProcessor
+    private MetricsManager.DataSourceInfo processDataSource(final EtlPipelineItem conf) { // Use MetricsManager type
         final Instant sourceStart = Instant.now();
         final String sourceName = "%s".formatted(conf.pipelineName());
         final String currentThreadName = Thread.currentThread().getName();
@@ -167,7 +136,7 @@ public class YAFPF {
 
             if (lock == null) {
                 System.err.printf("!!! WARN: Could not acquire lock for Source %s (%s). Already processed? Skipping.%n", sourceName, lockFilePath);
-                return new DataSourceInfo(conf.pipelineName(), sourceName, Status.PASS, Duration.ZERO, currentThreadName, List.of(),
+                return new MetricsManager.DataSourceInfo(conf.pipelineName(), sourceName, MetricsManager.Status.PASS, Duration.ZERO, currentThreadName, List.of(), // Use MetricsManager types
                         new RuntimeException("Skipped due to existing lock file: " + lockFilePath));
             }
             System.out.printf("  Source %s: Acquired lock file %s%n", sourceName, lockFilePath);
@@ -179,22 +148,22 @@ public class YAFPF {
             } catch (final IOException e) {
                 System.err.printf("!!! FATAL: Failed to list/discover partitions for Source %s: %s%n", sourceName, e.getMessage());
                 // Ensure lock is released if we return early due to this error. The try-with-resources on the lock handles this, but good to be mindful.
-                return createFailedDataSourceMetrics(conf, e);
+                return MetricsManager.createFailedDataSourceMetrics(conf, e); // Use MetricsManager method
             }
 
             if (partitionsToProcess.isEmpty() && pollInf.useSubDirAsPartition()) { // Check if dirAsPartition was true for this message
                 System.out.printf("  Source %s: No matching partition directories found. Skipping.%n", sourceName);
-                return new DataSourceInfo(conf.pipelineName(), sourceName, Status.PASS, Duration.ZERO, currentThreadName, List.of());
+                return new MetricsManager.DataSourceInfo(conf.pipelineName(), sourceName, MetricsManager.Status.PASS, Duration.ZERO, currentThreadName, List.of()); // Use MetricsManager types
             }
 
             System.out.printf("  Source %s: Submitting %d partitions (partitionConcurrency=%d).%n", sourceName, partitionsToProcess.size(), pollInf.batchSize()); // conf.batchSize() is partitionConcurrency
 
-            List<PartitionInfo> partitionResults;
-            Status sourceStatus;
+            List<MetricsManager.PartitionInfo> partitionResults; // Use MetricsManager type
+            MetricsManager.Status sourceStatus; // Use MetricsManager type
             final int partitionConcurrency = Math.max(1, pollInf.batchSize()); // Uses conf.batchSize()
             final ThreadFactory partitionFactory = createPlatformThreadFactory(sourceName + "-Partition-");
             final ExecutorService partitionExecutor = Executors.newFixedThreadPool(partitionConcurrency, partitionFactory);
-            final List<CompletableFuture<PartitionInfo>> partitionFutures = new ArrayList<>();
+            final List<CompletableFuture<MetricsManager.PartitionInfo>> partitionFutures = new ArrayList<>(); // Use MetricsManager type
             final AtomicInteger partitionCounter = new AtomicInteger(1);
 
             try {
@@ -207,31 +176,32 @@ public class YAFPF {
                                 } catch (final RuntimeException e) {
                                     System.err.printf("!!! Uncaught RuntimeException processing partition %s for source %s: %s%n", partitionId, sourceName, e.getMessage());
                                     e.printStackTrace(System.err);
-                                    return createFailedPartitionMetrics(pollInf.sourceId(), partitionId, e);
+                                    return MetricsManager.createFailedPartitionMetrics(pollInf.sourceId(), partitionId, e); // Use MetricsManager method
                                 }
                             }, partitionExecutor));
                 }
                 partitionResults = new CopyOnWriteArrayList<>(waitForCompletableFuturesAndCollect("Partition", partitionFutures, pollInf.sourceId()));
-                sourceStatus = determineOverallStatus(partitionResults, partitionsToProcess.size(), "Source", sourceName);
+                sourceStatus = MetricsManager.determineOverallStatus(partitionResults, partitionsToProcess.size(), "Source", sourceName); // Use MetricsManager method
             } finally {
                 shutdownExecutorService(partitionExecutor, sourceName + "-PartitionExecutor");
             }
             System.out.printf("Finished Data Source %s%n", sourceName);
-            return new DataSourceInfo(pollInf.sourceId(), sourceName, sourceStatus, Duration.between(sourceStart, Instant.now()), currentThreadName, List.copyOf(partitionResults));
+            return new MetricsManager.DataSourceInfo(pollInf.sourceId(), sourceName, sourceStatus, Duration.between(sourceStart, Instant.now()), currentThreadName, List.copyOf(partitionResults)); // Use MetricsManager type
         } catch (OverlappingFileLockException e) {
             System.err.printf("!!! WARN: Lock for Source %s (%s) held by another process. Skipping. %s%n", sourceName, lockFilePath, e.getMessage());
-            return new DataSourceInfo(pollInf.sourceId(), sourceName, Status.PASS, Duration.ZERO, currentThreadName, List.of(),
+            return new MetricsManager.DataSourceInfo(pollInf.sourceId(), sourceName, MetricsManager.Status.PASS, Duration.ZERO, currentThreadName, List.of(), // Use MetricsManager types
                     new RuntimeException("Skipped due to overlapping lock: " + lockFilePath, e));
         } catch (IOException e) {
             System.err.printf("!!! FATAL: Failed to access lock file for Source %s (%s): %s%n", sourceName, lockFilePath, e.getMessage());
-            return createFailedDataSourceMetrics(conf, new IOException("Failed to acquire lock file: " + lockFilePath, e));
+            return MetricsManager.createFailedDataSourceMetrics(conf, new IOException("Failed to acquire lock file: " + lockFilePath, e)); // Use MetricsManager method
         } finally {
             System.out.printf("  Source %s: Released lock file %s%n", sourceName, lockFilePath);
         }
     }
 
     // --- Partition Level Processing ---
-    private PartitionInfo processPartition(final EtlPipelineItem conf, final String partitionId, final Path partitionPath) { // Parameter is EtlPipelineItem
+    // TODO: Move this method to PartitionProcessor
+    public MetricsManager.PartitionInfo processPartition(final EtlPipelineItem conf, final String partitionId, final Path partitionPath) { // Use MetricsManager type
         final Instant partitionStart = Instant.now();
         final String threadName = Thread.currentThread().getName();
         System.out.printf("%n  Starting Partition %s for %s on T %s%n", partitionId, conf.pipelineName(), threadName);
@@ -243,20 +213,20 @@ public class YAFPF {
                     partitionId, fileBatches.stream().mapToInt(List::size).sum(), pollInf.fileFilter(), fileBatches.size(), pollInf.numThreads()); // Uses conf.concurrency()
         } catch (final IOException e) {
             System.err.printf("!!! FATAL: Failed to list/batch files for Partition %s: %s%n", partitionId, e.getMessage());
-            return createFailedPartitionMetrics(pollInf.sourceId(), partitionId, e);
+            return MetricsManager.createFailedPartitionMetrics(pollInf.sourceId(), partitionId, e); // Use MetricsManager method
         }
 
         if (fileBatches.isEmpty()) {
             System.out.printf("    Partition %s: No matching files. Skipping.%n", partitionId);
-            return new PartitionInfo(pollInf.sourceId(), partitionId, Status.PASS, Duration.ZERO, threadName, List.of());
+            return new MetricsManager.PartitionInfo(pollInf.sourceId(), partitionId, MetricsManager.Status.PASS, Duration.ZERO, threadName, List.of()); // Use MetricsManager types
         }
 
-        List<BatchInfo> batchResults;
-        Status partitionStatus;
+        List<MetricsManager.BatchInfo> batchResults; // Use MetricsManager type
+        MetricsManager.Status partitionStatus; // Use MetricsManager type
         final int concurrency = Math.max(1, pollInf.numThreads()); // Uses conf.concurrency()
         final ThreadFactory batchFactory = createPlatformThreadFactory(threadName.replace("-Partition-", "-Batch-") + "-");
         final ExecutorService batchExecutor = Executors.newFixedThreadPool(concurrency, batchFactory);
-        final List<CompletableFuture<BatchInfo>> batchFutures = new ArrayList<>();
+        final List<CompletableFuture<MetricsManager.BatchInfo>> batchFutures = new ArrayList<>(); // Use MetricsManager type
         final AtomicInteger batchCounter = new AtomicInteger(1);
 
         try {
@@ -266,25 +236,19 @@ public class YAFPF {
                 batchFutures.add(processBatch(conf, currentBatchId, fileBatchData, batchExecutor)); // Passes EtlPipelineItem
             }
             batchResults = new CopyOnWriteArrayList<>(waitForCompletableFuturesAndCollect("Batch", batchFutures, partitionId));
-            partitionStatus = determineOverallStatus(batchResults, batchFutures.size(), "Partition", partitionId);
+            partitionStatus = MetricsManager.determineOverallStatus(batchResults, batchFutures.size(), "Partition", partitionId); // Use MetricsManager method
         } finally {
             shutdownExecutorService(batchExecutor, partitionId + "-BatchExecutor");
         }
         System.out.printf("  Finished Partition %s for Source %s%n", partitionId, pollInf.sourceId());
-        return new PartitionInfo(pollInf.sourceId(), partitionId, partitionStatus, Duration.between(partitionStart, Instant.now()), threadName, List.copyOf(batchResults));
+        return new MetricsManager.PartitionInfo(pollInf.sourceId(), partitionId, partitionStatus, Duration.between(partitionStart, Instant.now()), threadName, List.copyOf(batchResults)); // Use MetricsManager type
     }
 
     // --- Batch Level Processing (Returns CompletableFuture) ---
-    private record ProcessingResult(int batchId, String batchName, Instant batchStart, String threadName,
-                                    List<Path> batchData, Map<String, String> filesToLoad) {
-    }
-
-    // Add this private record inside the FFPF class
-    private record LoadTaskContext(String fileName, String tableName, CompletableFuture<LoadInfo> future) {
-    }
+    // Records moved to be public static above
 
     // Add this private method to the FFPF class
-    private List<Path> discoverPartitions(EtlPipelineItem conf, String sourceName) throws IOException {
+    public static List<Path> discoverPartitions(EtlPipelineItem conf, String sourceName) throws IOException {
         SourceItem pollInf = conf.sources().getFirst();
         Path sourceDirPath = pollInf.sourceDir();
         if (!Files.isDirectory(sourceDirPath)) {
@@ -301,7 +265,8 @@ public class YAFPF {
         }
     }
 
-    private CompletableFuture<BatchInfo> processBatch(
+    // TODO: Move this method to BatchProcessor
+    private static CompletableFuture<MetricsManager.BatchInfo> processBatch( // Changed to private, Use MetricsManager type
             final EtlPipelineItem conf, // Parameter is EtlPipelineItem
             final int batchId,
             final List<Path> batchData,
@@ -324,21 +289,21 @@ public class YAFPF {
                                 filesToLoad.put(p.toString(), "table-" + (p.hashCode() % 2 + 1));
                             }
                             System.out.printf("      %s: Processing phase completed.%n", batchName);
-                            return new ProcessingResult(batchId, batchName, batchStart, currentThreadName, batchData, filesToLoad);
+                            return new MetricsManager.ProcessingResult(batchId, batchName, batchStart, currentThreadName, batchData, filesToLoad); // Use MetricsManager type
                         }, batchExecutor)
                 .thenComposeAsync(processingResult -> {
                     System.out.printf("      %s: Starting load phase (%d files) virtual threads...%n", processingResult.batchName(), processingResult.filesToLoad().size());
                     final ExecutorService loadExecutor = Executors.newVirtualThreadPerTaskExecutor();
                     // Use LoadTaskContext to keep fileName and tableName with the future
-                    final List<LoadTaskContext> loadTaskContexts = new ArrayList<>();
+                    final List<MetricsManager.LoadTaskContext> loadTaskContexts = new ArrayList<>(); // Use MetricsManager type
                     try {
                         for (final Map.Entry<String, String> entry : processingResult.filesToLoad().entrySet()) {
                             final String fileName = entry.getKey();
                             final String tableName = entry.getValue();
-                            CompletableFuture<LoadInfo> loadFuture = CompletableFuture.supplyAsync(
+                            CompletableFuture<MetricsManager.LoadInfo> loadFuture = CompletableFuture.supplyAsync( // Use MetricsManager type
                                     () -> {
                                         try {
-                                            return simulateLoad(fileName, tableName);
+                                            return simulateLoad(fileName, tableName); // simulateLoad still returns YAFPF.LoadInfo or needs update
                                         } catch (final InterruptedException e) {
                                             Thread.currentThread().interrupt();
                                             throw new CompletionException("Load interrupted for " + fileName, e);
@@ -347,17 +312,17 @@ public class YAFPF {
                                             throw new CompletionException("Load failed for " + fileName, e);
                                         }
                                     }, loadExecutor);
-                            loadTaskContexts.add(new LoadTaskContext(fileName, tableName, loadFuture));
+                            loadTaskContexts.add(new MetricsManager.LoadTaskContext(fileName, tableName, loadFuture)); // Use MetricsManager type
                         }
 
-                        final List<CompletableFuture<LoadInfo>> loadFutures = loadTaskContexts.stream()
-                                .map(LoadTaskContext::future)
+                        final List<CompletableFuture<MetricsManager.LoadInfo>> loadFutures = loadTaskContexts.stream() // Use MetricsManager type
+                                .map(MetricsManager.LoadTaskContext::future) // Use MetricsManager type
                                 .toList();
 
                         return CompletableFuture.allOf(loadFutures.toArray(new CompletableFuture[0]))
                                 .thenApplyAsync(v ->
                                                 // Extracted logic into a new helper method
-                                                buildBatchMetricsFromLoadResults(processingResult, loadTaskContexts),
+                                                buildBatchMetricsFromLoadResults(processingResult, loadTaskContexts), // buildBatchMetricsFromLoadResults returns YAFPF.BatchInfo or needs update
                                         batchExecutor); // Ensure this runs on batchExecutor
                     } finally {
                         // Ensure loadExecutor is always shutdown, even if task submission fails
@@ -366,12 +331,12 @@ public class YAFPF {
                 }, batchExecutor);
     }
 
-    private BatchInfo buildBatchMetricsFromLoadResults(
-            ProcessingResult processingResult,
-            List<LoadTaskContext> loadTaskContexts) {
+    private static MetricsManager.BatchInfo buildBatchMetricsFromLoadResults( // Changed to private, Use MetricsManager type
+            MetricsManager.ProcessingResult processingResult, // Use MetricsManager type
+            List<MetricsManager.LoadTaskContext> loadTaskContexts) { // Use MetricsManager type
 
-        final List<LoadInfo> loadResults = new ArrayList<>();
-        for (LoadTaskContext taskCtx : loadTaskContexts) {
+        final List<MetricsManager.LoadInfo> loadResults = new ArrayList<>(); // Use MetricsManager type
+        for (MetricsManager.LoadTaskContext taskCtx : loadTaskContexts) { // Use MetricsManager type
             try {
                 loadResults.add(taskCtx.future().join());
             } catch (final CompletionException | CancellationException e) {
@@ -380,25 +345,25 @@ public class YAFPF {
                         processingResult.batchName(), taskCtx.fileName(), taskCtx.tableName(), e.getMessage());
                 Throwable cause = (e instanceof CompletionException) ? e.getCause() : e;
                 // Now we have accurate fileName and tableName
-                loadResults.add(createFailedLoadMetrics(taskCtx.fileName(), taskCtx.tableName(), cause));
+                loadResults.add(MetricsManager.createFailedLoadMetrics(taskCtx.fileName(), taskCtx.tableName(), cause)); // Use MetricsManager method
             }
         }
 
-        final Status loadPhaseStatus = determineOverallStatus(loadResults, processingResult.filesToLoad().size(), "Load Phase for Batch", processingResult.batchName());
+        final MetricsManager.Status loadPhaseStatus = MetricsManager.determineOverallStatus(loadResults, processingResult.filesToLoad().size(), "Load Phase for Batch", processingResult.batchName()); // Use MetricsManager method and type
         // The overallBatchStatus should consider if the processing phase (before load) also passed.
         // Assuming if we reached here, processing phase was successful, otherwise .exceptionally() would have caught it.
         // If processingResult itself could carry a status, that would be more explicit.
         // For now, if loadPhaseStatus is FAIL, the batch is FAIL.
-        final Status overallBatchStatus = (loadPhaseStatus == Status.PASS) ? Status.PASS : Status.FAIL;
+        final MetricsManager.Status overallBatchStatus = (loadPhaseStatus == MetricsManager.Status.PASS) ? MetricsManager.Status.PASS : MetricsManager.Status.FAIL; // Use MetricsManager type
 
-        if (overallBatchStatus == Status.FAIL) {
+        if (overallBatchStatus == MetricsManager.Status.FAIL) { // Use MetricsManager type
             System.out.printf("      %s: Load phase marked as FAIL.%n", processingResult.batchName());
         } else {
             System.out.printf("      %s: Load phase completed successfully.%n", processingResult.batchName());
         }
         System.out.printf("    Finished %s on Thread %s%n", processingResult.batchName(), processingResult.threadName());
 
-        return new BatchInfo(processingResult.batchId(), processingResult.batchName(), overallBatchStatus,
+        return new MetricsManager.BatchInfo(processingResult.batchId(), processingResult.batchName(), overallBatchStatus, // Use MetricsManager type
                 Duration.between(processingResult.batchStart(), Instant.now()), processingResult.threadName(),
                 null, // This null is for processing phase failure, handled by .exceptionally()
                 List.copyOf(loadResults));
@@ -406,7 +371,8 @@ public class YAFPF {
 
 
     // --- Load Task Simulation ---
-    private LoadInfo simulateLoad(final String fileName, final String targetTable) throws InterruptedException {
+    // This method's return type and internal new LoadInfo need to be updated to MetricsManager.LoadInfo
+    public static MetricsManager.LoadInfo simulateLoad(final String fileName, final String targetTable) throws InterruptedException { // Use MetricsManager type
         final Instant loadStart = Instant.now();
         final String threadName = Thread.currentThread().getName();
         final String stageName = "Loading " + Paths.get(fileName).getFileName() + " to " + targetTable;
@@ -416,7 +382,7 @@ public class YAFPF {
                 throw new RuntimeException("Simulated DB error for " + fileName);
             }
             System.out.printf("        -> %s completed on %s%n", stageName, threadName);
-            return new LoadInfo(fileName, targetTable, Status.PASS, Duration.between(loadStart, Instant.now()), threadName, null);
+            return new MetricsManager.LoadInfo(fileName, targetTable, MetricsManager.Status.PASS, Duration.between(loadStart, Instant.now()), threadName, null); // Use MetricsManager types
         } catch (final RuntimeException e) {
             System.err.printf("          ERROR during %s on %s: %s%n", stageName, threadName, e.getMessage());
             throw e;
@@ -427,7 +393,7 @@ public class YAFPF {
         }
     }
 
-    private <T> List<T> waitForCompletableFuturesAndCollect(
+    public static <T extends MetricsManager.HasStatus> List<T> waitForCompletableFuturesAndCollect( // Use MetricsManager type
             final String levelName, final List<CompletableFuture<T>> futures, final Object identifier) {
         if (futures.isEmpty()) {
             System.out.printf("      No %s tasks for (ID: %s).%n", levelName, identifier != null ? identifier : "N/A");
@@ -458,27 +424,14 @@ public class YAFPF {
         return results;
     }
 
-    private <T extends HasStatus> Status determineOverallStatus(
-            final List<T> results, final int expectedTaskCount, final String levelName, final Object identifier) {
-        final String idStr = identifier != null ? identifier.toString() : "N/A";
-        if (results.stream().anyMatch(r -> r.status() == Status.FAIL)) {
-            System.err.printf("  %s %s: FAIL (sub-task failed).%n", levelName, idStr);
-            return Status.FAIL;
-        }
-        if (results.size() < expectedTaskCount) {
-            System.err.printf("  %s %s: FAIL (missing results %d/%d).%n", levelName, idStr, results.size(), expectedTaskCount);
-            return Status.FAIL;
-        }
-        System.out.printf("  %s %s: PASS (%d/%d sub-tasks succeeded).%n", levelName, idStr, results.size(), expectedTaskCount);
-        return Status.PASS;
-    }
+    // determineOverallStatus has been moved to MetricsManager.java
 
     // --- Factory and Shutdown Methods ---
-    private static ThreadFactory createPlatformThreadFactory(final String prefix) {
+    public static ThreadFactory createPlatformThreadFactory(final String prefix) { // This is a generic utility, not directly metrics related for now
         return Thread.ofPlatform().name(prefix, 0).factory();
     }
 
-    private static void shutdownExecutorService(final ExecutorService executor, final String name) {
+    public static void shutdownExecutorService(final ExecutorService executor, final String name) {
         if (executor == null) return;
         System.out.printf("      Shutting down executor: %s%n", name);
         executor.shutdown();
@@ -533,23 +486,7 @@ public class YAFPF {
         return buckets;
     }
 
-    // --- Failure Metric Helpers ---
-    private static DataSourceInfo createFailedDataSourceMetrics(final EtlPipelineItem conf, final Throwable cause) { // Parameter is EtlPipelineItem
-        SourceItem pollInf = conf.sources().getFirst(); //todo
-        return new DataSourceInfo(pollInf.sourceId(), conf.pipelineName(), Status.FAIL, Duration.ZERO, Thread.currentThread().getName(), List.of(), cause);
-    }
-
-    private static PartitionInfo createFailedPartitionMetrics(final String sourceId, final String partitionId, final Throwable cause) {
-        return new PartitionInfo(sourceId, partitionId, Status.FAIL, Duration.ZERO, Thread.currentThread().getName(), List.of(), cause);
-    }
-
-    private static BatchInfo createFailedBatchMetrics(final int batchId, final String batchName, final Throwable cause) {
-        return new BatchInfo(batchId, batchName, Status.FAIL, Duration.ZERO, Thread.currentThread().getName(), cause, List.of());
-    }
-
-    private static LoadInfo createFailedLoadMetrics(final String fileName, final String targetTable, final Throwable cause) {
-        return new LoadInfo(fileName, targetTable, Status.FAIL, Duration.ZERO, Thread.currentThread().getName(), cause);
-    }
+    // Failure Metric Helper methods have been moved to MetricsManager.java
 
     // --- Main Method (Example Usage) ---
     public static void main(final String[] args) throws IOException {
@@ -575,7 +512,7 @@ public class YAFPF {
             System.out.println("========================================================");
             System.out.println(" Starting Execution (CompletableFuture with Externalized Config Model) ");
             System.out.println("========================================================");
-            final ExecutionInfo metrics = executor.execute();
+            final MetricsManager.ExecutionInfo metrics = executor.execute(); // Use MetricsManager type
             System.out.println("\n\n========================================================");
             System.out.println(" Execution Finished ");
             System.out.println("========================================================");
@@ -590,20 +527,20 @@ public class YAFPF {
     }
 
     // --- Metrics Printing ---
-    private static void printMetricsSummary(final ExecutionInfo metrics) {
+    private static void printMetricsSummary(final MetricsManager.ExecutionInfo metrics) { // Use MetricsManager type
         System.out.println("Total Execution Time: " + metrics.totalDuration().toMillis() + " ms");
         System.out.println("---------------------- METRICS SUMMARY ----------------------");
-        for (final DataSourceInfo dsMetrics : metrics.dataSourceInfo()) {
+        for (final MetricsManager.DataSourceInfo dsMetrics : metrics.dataSourceInfo()) { // Use MetricsManager type
             String dsFailInfo = dsMetrics.failureCause() != null ? "[FAIL: " + dsMetrics.failureCause().getMessage() + "]" : "";
             System.out.printf("Data Source: %-10s | Status: %-4s | Duration: %5dms | Thread: %-20s | Partitions: %d %s%n",
                     dsMetrics.sourceName(), dsMetrics.status(), dsMetrics.duration().toMillis(), dsMetrics.threadName(), dsMetrics.partitionInfo().size(), dsFailInfo);
-            for (final PartitionInfo pMetrics : dsMetrics.partitionInfo()) {
+            for (final MetricsManager.PartitionInfo pMetrics : dsMetrics.partitionInfo()) { // Use MetricsManager type
                 String pFailInfo = pMetrics.failureCause() != null ? "[FAIL: " + pMetrics.failureCause().getMessage() + "]" : "";
                 System.out.printf("  Partition: %-20s | Status: %-4s | Duration: %5dms | Thread: %-25s | Batches: %d %s%n",
                         pMetrics.partitionId(), pMetrics.status(), pMetrics.duration().toMillis(), pMetrics.threadName(), pMetrics.batchMetrics().size(), pFailInfo);
-                for (final BatchInfo bMetrics : pMetrics.batchMetrics()) {
+                for (final MetricsManager.BatchInfo bMetrics : pMetrics.batchMetrics()) { // Use MetricsManager type
                     String procFail = bMetrics.failureCause() != null ? "[PROC_FAIL]" : "";
-                    long loadFailCount = bMetrics.loadInfo().stream().filter(lm -> lm.status() == Status.FAIL).count();
+                    long loadFailCount = bMetrics.loadInfo().stream().filter(lm -> lm.status() == MetricsManager.Status.FAIL).count(); // Use MetricsManager type
                     String loadFail = loadFailCount > 0 ? "[LOAD_FAIL(" + loadFailCount + ")]" : "";
                     System.out.printf("    Batch: %-35s | Status: %-4s | Duration: %5dms | Thread: %-30s | Loads: %d %s %s%n",
                             bMetrics.batchName(), bMetrics.status(), bMetrics.duration().toMillis(), bMetrics.threadName(), bMetrics.loadInfo().size(), procFail, loadFail);
