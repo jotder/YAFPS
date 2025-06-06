@@ -2,7 +2,8 @@ package org.gamma.processing;
 
 import org.gamma.config.YamlSourceConfigAdapter;
 // import org.gamma.processing.BatchProcessor; // No longer needed as ProcessingResult is top-level
-import org.gamma.processing.ProcessingResult; // Import the new top-level ProcessingResult
+// import org.gamma.processing.ProcessingResult; // Will use MetricsManager.ProcessingResult
+import org.gamma.metrics.MetricsManager; // Added import
 import org.gamma.metrics.FileInfo; // Ensure this is imported for fileInfoList
 import org.gamma.metrics.RouteInfo;
 import org.gamma.metrics.Status;
@@ -59,9 +60,9 @@ public abstract class AbstractBatchFileParser implements FileParser {
     // Keep simulation constants here or move elsewhere
     private static final int SIMULATED_PROCESSING_FAILURE_MODULO = 10;
 
-    // ProcessingResult is now a top-level class: org.gamma.processing.ProcessingResult
+    // ProcessingResult is now a top-level class: org.gamma.processing.ProcessingResult - comment to be removed or updated
 
-    public ProcessingResult processPhase(int batchId, String batchName, List<Path> paths) throws // Return type changed to top-level ProcessingResult
+    public MetricsManager.ProcessingResult processPhase(int batchId, String batchName, List<Path> paths) throws // Return type changed
             IOException {
         Instant batchStart = Instant.now(); // Reinstated
         String currentThreadName = Thread.currentThread().getName(); // Reinstated
@@ -197,7 +198,7 @@ public abstract class AbstractBatchFileParser implements FileParser {
         }
 
 //        System.out.printf("      %s: Processing phase completed successfully.%n", batchName);
-        return new ProcessingResult(batchId, batchName, batchStart, currentThreadName, paths, filesToLoad, fileInfoList); // Use new ProcessingResult
+        return new MetricsManager.ProcessingResult(batchId, batchName, batchStart, currentThreadName, paths, filesToLoad, fileInfoList); // Use MetricsManager.ProcessingResult
     }
 
     public abstract String createOutFileName(List<Path> paths);

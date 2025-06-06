@@ -1,5 +1,10 @@
 package org.gamma.config;
 
+// Removed import org.gamma.config.simulation.MetricSimulator;
+// MetricSimulator is now in org.gamma.config (same package)
+import org.gamma.config.RuntimeConfigManager.PipelineRuntimeState; // Added import
+import org.gamma.config.RuntimeConfigManager.SourceRuntimeState; // Added import
+
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.Executors;

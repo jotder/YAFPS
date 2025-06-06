@@ -3,7 +3,7 @@ org/gamma/config/FieldMetadata.class
 org/gamma/config/ConfigManager.class
 org/gamma/metrics/MetricsManager$BatchInfo.class
 org/gamma/processing/AbstractBatchFileParser.class
-org/gamma/processing/ProcessingResult.class
+org/gamma/config/RuntimeConfigManager$SourceRuntimeState.class
 org/gamma/metrics/LoadMetrics.class
 org/gamma/metrics/DataSourceMetrics.class
 org/gamma/processing/PartitionHandler.class
@@ -35,6 +35,7 @@ org/gamma/config/RuleActionConfig.class
 org/gamma/config/AggregationDetailItem.class
 org/gamma/metrics/MetricsManager$ExecutionInfo.class
 org/gamma/config/TransformationItem.class
+org/gamma/config/RuntimeConfigManager$PipelineRuntimeState.class
 org/gamma/config/FieldValidationConfigItem.class
 org/gamma/metrics/MetricsManager$LoadTaskContext.class
 org/gamma/metrics/PollInfo.class
@@ -47,7 +48,6 @@ org/gamma/config/RuntimeConfigManager.class
 org/gamma/metrics/StatusHelper.class
 org/gamma/processing/PartitionProcessor.class
 org/gamma/config/EtlPipelineItem.class
-org/gamma/config/SourceRuntimeState.class
 org/gamma/processing/BatchMergeSplitWriter.class
 org/gamma/config/SourceItem.class
 org/gamma/config/OutputItem.class
@@ -67,4 +67,3 @@ org/gamma/config/DataSourceDefinition.class
 org/gamma/config/ValidationRulesItem.class
 org/gamma/config/SourceConfig.class
 org/gamma/plugin/FileLoader.class
-org/gamma/config/PipelineRuntimeState.class
