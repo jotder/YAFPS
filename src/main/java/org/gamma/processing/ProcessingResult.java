@@ -4,8 +4,14 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import org.gamma.metrics.FileInfo; // Assuming FileInfo is in org.gamma.metrics
 
-// Helper record for intermediate processing result (can be private inner record)
-public record ProcessingResult(int batchId, String batchName, Instant batchStart, String threadName,
-                                List<Path> batchData, Map<String, String> filesParsed) {
-}
+public record ProcessingResult(
+    int batchId,
+    String batchName,
+    Instant batchStart,
+    String threadName,
+    List<Path> batchData,
+    Map<String, String> filesToLoad,
+    List<FileInfo> fileInfoList
+) {}
