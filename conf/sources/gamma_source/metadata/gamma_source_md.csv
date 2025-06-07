@@ -1,0 +1,8 @@
+seq,name,type,nullable,format
+0,transaction_id,varchar,false,
+1,transaction_date,timestamp,false,YYYY-MM-DD HH24:MI:SS
+2,amount,numeric,false,
+3,currency,varchar,false,
+4,customer_id,varchar,true,
+5,status,varchar,false,
+6,error_message,varchar,true,

@@ -1,0 +1,65 @@
+# Pipeline Specific Configuration for: Gamma_Source_Processing
+# Contains detailed data structure, validation, and transformation logic.
+
+pipelineName: "Gamma_Source_Processing" # For reference and validation
+
+# Detailed configurations for each source defined in the main framework file
+sourcesDetails:
+  - sourceId: "Gamma_Source_Main" # Must match sourceId in main config
+    # Path to the metadata file describing the source data structure
+    sourceMetadata: "metadata/gamma_source_md.csv"
+    # Comma-separated list of all source field names
+    sourceFields: "transaction_id,transaction_date,amount,currency,customer_id,status,error_message"
+    # Record and field validation rules for this source
+    validationRules:
+      maxRecordLength: 5000
+      defaultMaxFieldSize: 100
+      fieldValidations:
+        - fieldName: "transaction_id"
+          validations:
+            - expression: "validationLib.isNotNull($transaction_id)"
+              errorMessage: "Transaction ID must not be null."
+            - expression: "validationLib.hasMinLength($transaction_id, 5)"
+              errorMessage: "Transaction ID must be at least 5 characters."
+        - fieldName: "amount"
+          validations:
+            - expression: "validationLib.isNumeric($amount)"
+              errorMessage: "Amount must be a valid number."
+            - expression: "validationLib.isGreaterThanOrEqual($amount, 0)"
+              errorMessage: "Amount must be a non-negative number."
+        - fieldName: "transaction_date"
+          validations:
+            - expression: "validationLib.isValidDateTimeFormat($transaction_date, 'YYYY-MM-DD HH24:MI:SS')"
+              errorMessage: "Transaction date must be in YYYY-MM-DD HH24:MI:SS format."
+
+# Output configurations for this pipeline
+outputs:
+  - outputId: "Gamma_FactTable_Output"
+    outputType: "FactTable"
+    active: true
+    transformations:
+      - transformationName: "DeriveEventYearMonth"
+        type: "customFunction"
+        expression: "event_year_month = dateTimeLib.formatDateTime($transaction_date, 'YYYY-MM-DD HH24:MI:SS', 'yyyyMM')"
+      - transformationName: "ConvertAmountToUSD" # Assuming a hypothetical conversion
+        type: "customFunction"
+        expression: "amount_usd = financeLib.convertToUSD($amount, $currency, $SYS_PROCESSING_DATE$)"
+      - transformationName: "NormalizeStatus"
+        type: "customFunction"
+        expression: "normalized_status = stringLib.toLowerCase($status)"
+      - transformationName: "CreateGammaFactPrimaryKey"
+        type: "customFunction"
+        expression: "fact_table_pk = cryptoLib.generateSHA256Key($transaction_id, $transaction_date, '|')"
+
+    deleteIntermediateFilesOnLoad: true
+    loadToDatabase: true
+    keepFileHeaderOnLoad: true
+    databaseConnectionRef: "local_pg_main" # Reference to a DB connection in main config
+    tableName: "gamma_trans_fct"
+
+  - outputId: "Gamma_Error_Records_Output"
+    outputType: "ErrorTable" # For records that fail validation
+    active: true
+    # Error records typically don't need transformations, they store raw data + error info
+    databaseConnectionRef: "local_pg_main"
+    tableName: "gamma_error_records"
