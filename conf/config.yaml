@@ -126,3 +126,47 @@ etlPipelines:
       deleteFilesOnLoadAfterDb: true # From source dir after successful staging DB load
       # (Moved to pipeline-specific file: sourceMetadata, sourceFields, validationRules)
       # performanceTuning: ... (can be defined for MFS as well)
+
+  # Pipeline 3: Gamma Source Data Processing
+  - pipelineName: "Gamma_Source_Processing"
+    description: "Processes Gamma Source data."
+    pipelineVersion: "1.0"
+    active: true
+    logFile: "logs/gamma_source_pipeline.log"
+    statusDir: "status/gamma_source"
+    fileInfoTable: "pipeline_gamma_process_info"
+    routeInfoTable: "pipeline_gamma_route_info"
+
+    # Path to the detailed configuration file for this pipeline
+    pipelineSpecificConfigFile: "sources/gamma_source/gamma_source.yaml"
+
+    # Core source configurations
+    sources:
+      - sourceId: "Gamma_Source_Main" # Must match sourceId in gamma_source.yaml
+        active: true
+        sourceDir: "data/gamma_source/source"
+        dirFilter: "glob:*" # Process all subdirectories
+        startDir: "0"       # Placeholder, adjust if needed
+        endDir: "z"         # Placeholder, adjust if needed
+        dataFileType: "CSV"
+        fileFilter: "glob:*.csv" # Process all CSV files
+        fileBackup: true
+        deleteAfterLoad: false
+        backupDir: "data/gamma_source/backup"
+        errBackup: true
+        errDir: "data/gamma_source/error"
+        outDir: "data/gamma_source/output_temp"
+        useSubDirAsPartition: true # Assuming subdirectories might be used for partitioning
+        headerLines: 1 # Assuming CSV files have a header row
+        # Initial performance values
+        numThreads: 2
+        batchSize: 20
+        # Staging database details
+        loadFiles: true
+        databaseConnectionRef: "local_pg_main" # Defined in databaseConnections
+        tableName: "gamma_trans_raw_staging"
+        keepFileHeader: true
+        deleteFilesOnLoadAfterDb: true
+    # autoTuning can be added here if needed, similar to AIR_CDR_Processing
+    autoTuning:
+      enabled: false # Disabled for now, can be configured later
