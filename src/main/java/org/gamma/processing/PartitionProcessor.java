@@ -1,10 +1,12 @@
 package org.gamma.processing;
 
-import org.gamma.YAFPS; // YAFPF instance might still be needed for non-metrics/non-config methods
+import org.gamma.YAFPS;
 import org.gamma.config.EtlPipelineItem;
 import org.gamma.config.SourceItem;
 import org.gamma.metrics.MetricsManager;
-import static org.gamma.metrics.MetricsManager.*; // Import all static members
+import org.gamma.util.ConcurrencyUtils; // Added import
+import org.gamma.util.FileUtils; // Added import
+import static org.gamma.metrics.MetricsManager.*;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -21,14 +23,15 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public class PartitionProcessor {
 
-    private final YAFPS YAFPSInstance; // Added to match constructor
-    private final EtlPipelineItem config; // Changed field name
+    // private final YAFPS YAFPSInstance; // No longer needed as BatchProcessor doesn't require it
+    private final EtlPipelineItem config;
     private final String partitionId;
     private final Path partitionPath;
 
-    public PartitionProcessor(YAFPS YAFPSInstance, EtlPipelineItem config, String partitionId, Path partitionPath) { // Added yafpfInstance
-        this.YAFPSInstance = YAFPSInstance; // Added assignment
-        this.config = config; // Changed assignment
+    // Updated constructor, removed YAFPSInstance
+    public PartitionProcessor(EtlPipelineItem config, String partitionId, Path partitionPath) {
+        // this.YAFPSInstance = YAFPSInstance;
+        this.config = config;
         this.partitionId = partitionId;
         this.partitionPath = partitionPath;
     }
@@ -40,7 +43,7 @@ public class PartitionProcessor {
         SourceItem pollInf = this.config.sources().getFirst();
         List<List<Path>> fileBatches;
         try {
-            fileBatches = YAFPS.getFileBatches(this.partitionPath, this.config);
+            fileBatches = FileUtils.getFileBatches(this.partitionPath, this.config); // Changed to FileUtils
             System.out.printf("    Partition %s: Found %d files matching '%s', %d batches (fileBatchConcurrency=%d).%n",
                     this.partitionId, fileBatches.stream().mapToInt(List::size).sum(), pollInf.fileFilter(), fileBatches.size(), pollInf.numThreads());
         } catch (final IOException e) {
@@ -56,7 +59,7 @@ public class PartitionProcessor {
         List<BatchInfo> batchResults; // Use MetricsManager.BatchInfo (via static import)
         Status partitionStatus; // Use MetricsManager.Status (via static import)
         final int concurrency = Math.max(1, pollInf.numThreads());
-        final ThreadFactory batchFactory = YAFPS.createPlatformThreadFactory(threadName.replace("-Partition-", "-Batch-") + "-");
+        final ThreadFactory batchFactory = ConcurrencyUtils.createPlatformThreadFactory(threadName.replace("-Partition-", "-Batch-") + "-"); // Changed to ConcurrencyUtils
         final ExecutorService batchExecutor = Executors.newFixedThreadPool(concurrency, batchFactory);
         final List<CompletableFuture<BatchInfo>> batchFutures = new ArrayList<>(); // Use MetricsManager.BatchInfo
         final AtomicInteger batchCounter = new AtomicInteger(1);
@@ -67,13 +70,14 @@ public class PartitionProcessor {
                 final int currentBatchId = batchCounter.getAndIncrement();
                 // Instantiate BatchProcessor and call its processBatch method
                 // BatchProcessor.processBatch() will return CompletableFuture<MetricsManager.BatchInfo>
-                org.gamma.processing.BatchProcessor batchProc = new org.gamma.processing.BatchProcessor(this.YAFPSInstance, this.config, currentBatchId, fileBatchData, batchExecutor);
+                // Updated BatchProcessor instantiation
+                org.gamma.processing.BatchProcessor batchProc = new org.gamma.processing.BatchProcessor(this.config, currentBatchId, fileBatchData, batchExecutor);
                 batchFutures.add(batchProc.processBatch());
             }
-            batchResults = new CopyOnWriteArrayList<>(YAFPS.waitForCompletableFuturesAndCollect("Batch", batchFutures, this.partitionId));
+            batchResults = new CopyOnWriteArrayList<>(ConcurrencyUtils.waitForCompletableFuturesAndCollect("Batch", batchFutures, this.partitionId)); // Changed to ConcurrencyUtils
             partitionStatus = MetricsManager.determineOverallStatus(batchResults, batchFutures.size(), "Partition", this.partitionId); // Use MetricsManager method
         } finally {
-            YAFPS.shutdownExecutorService(batchExecutor, this.partitionId + "-BatchExecutor");
+            ConcurrencyUtils.shutdownExecutorService(batchExecutor, this.partitionId + "-BatchExecutor"); // Changed to ConcurrencyUtils
         }
         System.out.printf("  Finished Partition %s for Source %s%n", this.partitionId, pollInf.sourceId());
         return new PartitionInfo(pollInf.sourceId(), this.partitionId, partitionStatus, Duration.between(partitionStart, Instant.now()), threadName, List.copyOf(batchResults)); // Use MetricsManager type
