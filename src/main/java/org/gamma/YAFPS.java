@@ -10,7 +10,6 @@ import org.gamma.config.ConfigManager;
 import org.gamma.config.EtlPipelineItem;
 import org.gamma.config.SourceItem;
 import org.gamma.metrics.MetricsManager;
-import static org.gamma.metrics.MetricsManager.*; // Import all static members
 
 import java.io.IOException;
 import java.io.RandomAccessFile;
@@ -44,7 +43,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Configuration is expected to be provided as a List of EtlPipelineItem objects,
  * typically loaded by a ConfigManager from a YAML file.
  */
-public class YAFPF {
+public class YAFPS {
 
     // --- Constants ---
     public static final int SIMULATED_PROCESSING_FAILURE_MODULO = 10; // Fail processing every Nth batch
@@ -68,7 +67,7 @@ public class YAFPF {
      *                      These are instances of {@link AppConfig}, typically loaded
      *                      by a {@code com.gamma.config.ConfigManager}.
      */
-    public YAFPF(final AppConfig sourceConfigs) {
+    public YAFPS(final AppConfig sourceConfigs) {
         this.sourceConfigs = Objects.requireNonNull(sourceConfigs, "Data source configurations cannot be null");
         if (sourceConfigs.etlPipelines().isEmpty()) {
             System.err.println("Warning: No source configurations provided.");
@@ -507,7 +506,7 @@ public class YAFPF {
 
         // createDummyData(appConfig.etlPipelines()); // Call moved to tests if needed
 
-        final YAFPF executor = new YAFPF(appConfig); // Pass List<EtlPipelineItem>
+        final YAFPS executor = new YAFPS(appConfig); // Pass List<EtlPipelineItem>
 
         try {
             System.out.println("========================================================");

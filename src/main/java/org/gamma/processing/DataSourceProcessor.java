@@ -1,6 +1,6 @@
 package org.gamma.processing;
 
-import org.gamma.YAFPF; // YAFPF instance might still be needed for non-metrics/non-config methods
+import org.gamma.YAFPS; // YAFPF instance might still be needed for non-metrics/non-config methods
 import org.gamma.config.EtlPipelineItem;
 import org.gamma.config.SourceItem;
 import org.gamma.metrics.MetricsManager;
@@ -25,11 +25,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public class DataSourceProcessor {
 
-    private final YAFPF yafpfInstance; // To call non-static helpers from YAFPF
+    private final YAFPS YAFPSInstance; // To call non-static helpers from YAFPF
     private final EtlPipelineItem config;
 
-    public DataSourceProcessor(YAFPF yafpfInstance, EtlPipelineItem config) {
-        this.yafpfInstance = yafpfInstance;
+    public DataSourceProcessor(YAFPS YAFPSInstance, EtlPipelineItem config) {
+        this.YAFPSInstance = YAFPSInstance;
         this.config = config;
     }
 
@@ -55,7 +55,7 @@ public class DataSourceProcessor {
 
             List<Path> partitionsToProcess;
             try {
-                partitionsToProcess = YAFPF.discoverPartitions(config, sourceName); // This YAFPF method is not metrics related
+                partitionsToProcess = YAFPS.discoverPartitions(config, sourceName); // This YAFPF method is not metrics related
             } catch (final IOException e) {
                 System.err.printf("!!! FATAL: Failed to list/discover partitions for Source %s: %s%n", sourceName, e.getMessage());
                 return MetricsManager.createFailedDataSourceMetrics(config, e); // Use MetricsManager method
@@ -71,7 +71,7 @@ public class DataSourceProcessor {
             List<PartitionInfo> partitionResults; // Use MetricsManager.PartitionInfo (via static import)
             Status sourceStatus; // Use MetricsManager.Status (via static import)
             final int partitionConcurrency = Math.max(1, pollInf.batchSize());
-            final ThreadFactory partitionFactory = YAFPF.createPlatformThreadFactory(sourceName + "-Partition-"); // This YAFPF method is not metrics related
+            final ThreadFactory partitionFactory = YAFPS.createPlatformThreadFactory(sourceName + "-Partition-"); // This YAFPF method is not metrics related
             final ExecutorService partitionExecutor = Executors.newFixedThreadPool(partitionConcurrency, partitionFactory);
             final List<CompletableFuture<PartitionInfo>> partitionFutures = new ArrayList<>(); // Use MetricsManager.PartitionInfo
             final AtomicInteger partitionCounter = new AtomicInteger(1);
@@ -83,7 +83,7 @@ public class DataSourceProcessor {
                             () -> {
                                 try {
                                     // Instantiate PartitionProcessor and call its processPartition method
-                                    PartitionProcessor partitionProcessor = new PartitionProcessor(this.yafpfInstance, this.config, partitionId, partitionPath);
+                                    PartitionProcessor partitionProcessor = new PartitionProcessor(this.YAFPSInstance, this.config, partitionId, partitionPath);
                                     return partitionProcessor.processPartition(); // This will return MetricsManager.PartitionInfo
                                 } catch (final RuntimeException e) {
                                     System.err.printf("!!! Uncaught RuntimeException processing partition %s for source %s: %s%n", partitionId, sourceName, e.getMessage());
@@ -92,10 +92,10 @@ public class DataSourceProcessor {
                                 }
                             }, partitionExecutor));
                 }
-                partitionResults = new CopyOnWriteArrayList<>(YAFPF.waitForCompletableFuturesAndCollect("Partition", partitionFutures, pollInf.sourceId())); // This YAFPF method is generic
+                partitionResults = new CopyOnWriteArrayList<>(YAFPS.waitForCompletableFuturesAndCollect("Partition", partitionFutures, pollInf.sourceId())); // This YAFPF method is generic
                 sourceStatus = MetricsManager.determineOverallStatus(partitionResults, partitionsToProcess.size(), "Source", sourceName); // Use MetricsManager method
             } finally {
-                YAFPF.shutdownExecutorService(partitionExecutor, sourceName + "-PartitionExecutor"); // This YAFPF method is not metrics related
+                YAFPS.shutdownExecutorService(partitionExecutor, sourceName + "-PartitionExecutor"); // This YAFPF method is not metrics related
             }
             System.out.printf("Finished Data Source %s%n", sourceName);
             return new DataSourceInfo(pollInf.sourceId(), sourceName, sourceStatus, Duration.between(sourceStart, Instant.now()), currentThreadName, List.copyOf(partitionResults)); // Use MetricsManager type

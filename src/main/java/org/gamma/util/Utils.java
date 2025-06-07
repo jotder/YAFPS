@@ -48,7 +48,7 @@ public final class Utils {
         final FileSystem fs = FileSystems.getDefault();
         final PathMatcher fileMatcher = (fileFilter != null && !fileFilter.isBlank())
                 ? fs.getPathMatcher(fileFilter)
-                : _ -> true;
+                : x -> true;
 
         try (var stream = Files.list(rootDir)) {
             return stream
@@ -62,7 +62,7 @@ public final class Utils {
         FileSystem fs = FileSystems.getDefault();
         final PathMatcher fileMatcher = (fileFilter != null && !fileFilter.isBlank())
                 ? fs.getPathMatcher(fileFilter)
-                : _ -> true;
+                : x -> true;
         try (Stream<Path> paths = Files.find(
                 rootDir,
                 maxDepth,

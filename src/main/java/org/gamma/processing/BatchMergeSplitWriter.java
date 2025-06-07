@@ -52,7 +52,7 @@ public class BatchMergeSplitWriter {
         Files.createDirectories(outputDir);
         Path mFlePath = outputDir.resolve(mergedFileName);
 
-        MergedFileWriter mergedFileWriter = this.partitionWriters.computeIfAbsent(mergedFileName, (_) -> {
+        MergedFileWriter mergedFileWriter = this.partitionWriters.computeIfAbsent(mergedFileName, (x) -> {
             try {
                 return new MergedFileWriter(mFlePath, this.headerFields, this.keepHeader);
             } catch (IOException e) {

@@ -1,6 +1,6 @@
 package org.gamma.processing;
 
-import org.gamma.YAFPF; // YAFPF instance might still be needed for non-metrics/non-config methods
+import org.gamma.YAFPS; // YAFPF instance might still be needed for non-metrics/non-config methods
 import org.gamma.config.EtlPipelineItem;
 import org.gamma.metrics.MetricsManager;
 import static org.gamma.metrics.MetricsManager.*; // Import all static members
@@ -20,14 +20,14 @@ import java.util.concurrent.ForkJoinPool; // Required for ForkJoinPool.commonPoo
 
 public class BatchProcessor {
 
-    private final YAFPF yafpfInstance;
+    private final YAFPS YAFPSInstance;
     private final EtlPipelineItem config;
     private final int batchId;
     private final List<Path> batchData;
     private final ExecutorService batchExecutor;
 
-    public BatchProcessor(YAFPF yafpfInstance, EtlPipelineItem config, int batchId, List<Path> batchData, ExecutorService batchExecutor) {
-        this.yafpfInstance = yafpfInstance; // Available if needed for non-static methods
+    public BatchProcessor(YAFPS YAFPSInstance, EtlPipelineItem config, int batchId, List<Path> batchData, ExecutorService batchExecutor) {
+        this.YAFPSInstance = YAFPSInstance; // Available if needed for non-static methods
         this.config = config;
         this.batchId = batchId;
         this.batchData = batchData;
@@ -44,7 +44,7 @@ public class BatchProcessor {
                             final Instant batchStart = Instant.now();
                             final String currentThreadName = Thread.currentThread().getName();
                             System.out.printf("      %s: Starting processing phase on T %s...%n", batchName, currentThreadName);
-                            if (this.batchId % YAFPF.SIMULATED_PROCESSING_FAILURE_MODULO == 0) {
+                            if (this.batchId % YAFPS.SIMULATED_PROCESSING_FAILURE_MODULO == 0) {
                                 throw new RuntimeException("Simulated processing failure in " + batchName);
                             }
                             final Map<String, String> filesToLoad = new LinkedHashMap<>();
@@ -65,7 +65,7 @@ public class BatchProcessor {
                             CompletableFuture<LoadInfo> loadFuture = CompletableFuture.supplyAsync( // Use MetricsManager.LoadInfo (via static import)
                                     () -> {
                                         try {
-                                            return YAFPF.simulateLoad(fileName, tableName); // YAFPF.simulateLoad now returns MetricsManager.LoadInfo
+                                            return YAFPS.simulateLoad(fileName, tableName); // YAFPF.simulateLoad now returns MetricsManager.LoadInfo
                                         } catch (final InterruptedException e) {
                                             Thread.currentThread().interrupt();
                                             throw new CompletionException("Load interrupted for " + fileName, e);
@@ -85,7 +85,7 @@ public class BatchProcessor {
                                                 buildBatchMetricsFromLoadResults(processingResult, loadTaskContexts), // Call local static method
                                         this.batchExecutor);
                     } finally {
-                        CompletableFuture.runAsync(() -> YAFPF.shutdownExecutorService(loadExecutor, processingResult.batchName() + "-LoadExecutor"), ForkJoinPool.commonPool());
+                        CompletableFuture.runAsync(() -> YAFPS.shutdownExecutorService(loadExecutor, processingResult.batchName() + "-LoadExecutor"), ForkJoinPool.commonPool());
                     }
                 }, this.batchExecutor)
                 .exceptionally(ex -> {
