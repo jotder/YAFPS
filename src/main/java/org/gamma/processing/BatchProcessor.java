@@ -1,9 +1,11 @@
 package org.gamma.processing;
 
-import org.gamma.YAFPS; // YAFPF instance might still be needed for non-metrics/non-config methods
+import org.gamma.YAFPS;
 import org.gamma.config.EtlPipelineItem;
 import org.gamma.metrics.MetricsManager;
-import static org.gamma.metrics.MetricsManager.*; // Import all static members
+import org.gamma.util.ConcurrencyUtils; // Added Import
+import org.gamma.processing.LoadSimulator; // Added Import
+import static org.gamma.metrics.MetricsManager.*;
 
 import java.nio.file.Path;
 import java.time.Instant;
@@ -20,14 +22,18 @@ import java.util.concurrent.ForkJoinPool; // Required for ForkJoinPool.commonPoo
 
 public class BatchProcessor {
 
-    private final YAFPS YAFPSInstance;
+    // Moved from YAFPS.java
+    public static final int SIMULATED_PROCESSING_FAILURE_MODULO = 10;
+
+    // private final YAFPS YAFPSInstance; // No longer needed
     private final EtlPipelineItem config;
     private final int batchId;
     private final List<Path> batchData;
     private final ExecutorService batchExecutor;
 
-    public BatchProcessor(YAFPS YAFPSInstance, EtlPipelineItem config, int batchId, List<Path> batchData, ExecutorService batchExecutor) {
-        this.YAFPSInstance = YAFPSInstance; // Available if needed for non-static methods
+    // Updated constructor, removed YAFPSInstance
+    public BatchProcessor(EtlPipelineItem config, int batchId, List<Path> batchData, ExecutorService batchExecutor) {
+        // this.YAFPSInstance = YAFPSInstance;
         this.config = config;
         this.batchId = batchId;
         this.batchData = batchData;
@@ -44,7 +50,8 @@ public class BatchProcessor {
                             final Instant batchStart = Instant.now();
                             final String currentThreadName = Thread.currentThread().getName();
                             System.out.printf("      %s: Starting processing phase on T %s...%n", batchName, currentThreadName);
-                            if (this.batchId % YAFPS.SIMULATED_PROCESSING_FAILURE_MODULO == 0) {
+                            // Uses local constant now
+                            if (this.batchId % SIMULATED_PROCESSING_FAILURE_MODULO == 0) {
                                 throw new RuntimeException("Simulated processing failure in " + batchName);
                             }
                             final Map<String, String> filesToLoad = new LinkedHashMap<>();
@@ -65,7 +72,8 @@ public class BatchProcessor {
                             CompletableFuture<LoadInfo> loadFuture = CompletableFuture.supplyAsync( // Use MetricsManager.LoadInfo (via static import)
                                     () -> {
                                         try {
-                                            return YAFPS.simulateLoad(fileName, tableName); // YAFPF.simulateLoad now returns MetricsManager.LoadInfo
+                                            // Changed to LoadSimulator.simulateLoad and removed constant arguments
+                                            return LoadSimulator.simulateLoad(fileName, tableName);
                                         } catch (final InterruptedException e) {
                                             Thread.currentThread().interrupt();
                                             throw new CompletionException("Load interrupted for " + fileName, e);
@@ -82,10 +90,11 @@ public class BatchProcessor {
 
                         return CompletableFuture.allOf(loadFutures.toArray(new CompletableFuture[0]))
                                 .thenApplyAsync(v ->
-                                                buildBatchMetricsFromLoadResults(processingResult, loadTaskContexts), // Call local static method
+                                                this.buildBatchMetricsFromLoadResults(processingResult, loadTaskContexts), // Call local non-static method
                                         this.batchExecutor);
                     } finally {
-                        CompletableFuture.runAsync(() -> YAFPS.shutdownExecutorService(loadExecutor, processingResult.batchName() + "-LoadExecutor"), ForkJoinPool.commonPool());
+                        // Changed to ConcurrencyUtils.shutdownExecutorService
+                        CompletableFuture.runAsync(() -> ConcurrencyUtils.shutdownExecutorService(loadExecutor, processingResult.batchName() + "-LoadExecutor"), ForkJoinPool.commonPool());
                     }
                 }, this.batchExecutor)
                 .exceptionally(ex -> {
@@ -95,7 +104,7 @@ public class BatchProcessor {
                 });
     }
 
-    private static BatchInfo buildBatchMetricsFromLoadResults( // Return MetricsManager.BatchInfo (via static import)
+    private BatchInfo buildBatchMetricsFromLoadResults( // Return MetricsManager.BatchInfo (via static import), changed to non-static
             MetricsManager.ProcessingResult processingResult, // Explicitly use MetricsManager.ProcessingResult
             List<LoadTaskContext> loadTaskContexts) { // Use MetricsManager.LoadTaskContext (via static import)
 

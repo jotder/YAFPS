@@ -4,10 +4,15 @@ import org.gamma.YAFPS; // YAFPF instance might still be needed for non-metrics/
 import org.gamma.config.EtlPipelineItem;
 import org.gamma.config.SourceItem;
 import org.gamma.metrics.MetricsManager;
+import org.gamma.util.ConcurrencyUtils;
+import org.gamma.util.FileUtils; // Added import
 import static org.gamma.metrics.MetricsManager.*; // Import all static members, including Status, DataSourceInfo, PartitionInfo etc.
 
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.nio.file.Files; // Added import
+import java.nio.file.FileSystems; // Added import
+import java.nio.file.PathMatcher; // Added import
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.channels.OverlappingFileLockException;
@@ -25,11 +30,12 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public class DataSourceProcessor {
 
-    private final YAFPS YAFPSInstance; // To call non-static helpers from YAFPF
+    // private final YAFPS YAFPSInstance; // No longer needed as PartitionProcessor doesn't require it
     private final EtlPipelineItem config;
 
-    public DataSourceProcessor(YAFPS YAFPSInstance, EtlPipelineItem config) {
-        this.YAFPSInstance = YAFPSInstance;
+    // Updated constructor, removed YAFPSInstance
+    public DataSourceProcessor(EtlPipelineItem config) {
+        // this.YAFPSInstance = YAFPSInstance;
         this.config = config;
     }
 
@@ -55,7 +61,7 @@ public class DataSourceProcessor {
 
             List<Path> partitionsToProcess;
             try {
-                partitionsToProcess = YAFPS.discoverPartitions(config, sourceName); // This YAFPF method is not metrics related
+                partitionsToProcess = this.discoverPartitions(config, sourceName); // Changed to local call
             } catch (final IOException e) {
                 System.err.printf("!!! FATAL: Failed to list/discover partitions for Source %s: %s%n", sourceName, e.getMessage());
                 return MetricsManager.createFailedDataSourceMetrics(config, e); // Use MetricsManager method
@@ -71,7 +77,7 @@ public class DataSourceProcessor {
             List<PartitionInfo> partitionResults; // Use MetricsManager.PartitionInfo (via static import)
             Status sourceStatus; // Use MetricsManager.Status (via static import)
             final int partitionConcurrency = Math.max(1, pollInf.batchSize());
-            final ThreadFactory partitionFactory = YAFPS.createPlatformThreadFactory(sourceName + "-Partition-"); // This YAFPF method is not metrics related
+            final ThreadFactory partitionFactory = ConcurrencyUtils.createPlatformThreadFactory(sourceName + "-Partition-"); // Changed to ConcurrencyUtils
             final ExecutorService partitionExecutor = Executors.newFixedThreadPool(partitionConcurrency, partitionFactory);
             final List<CompletableFuture<PartitionInfo>> partitionFutures = new ArrayList<>(); // Use MetricsManager.PartitionInfo
             final AtomicInteger partitionCounter = new AtomicInteger(1);
@@ -83,7 +89,8 @@ public class DataSourceProcessor {
                             () -> {
                                 try {
                                     // Instantiate PartitionProcessor and call its processPartition method
-                                    PartitionProcessor partitionProcessor = new PartitionProcessor(this.YAFPSInstance, this.config, partitionId, partitionPath);
+                                    // Updated PartitionProcessor instantiation
+                                    PartitionProcessor partitionProcessor = new PartitionProcessor(this.config, partitionId, partitionPath);
                                     return partitionProcessor.processPartition(); // This will return MetricsManager.PartitionInfo
                                 } catch (final RuntimeException e) {
                                     System.err.printf("!!! Uncaught RuntimeException processing partition %s for source %s: %s%n", partitionId, sourceName, e.getMessage());
@@ -92,10 +99,10 @@ public class DataSourceProcessor {
                                 }
                             }, partitionExecutor));
                 }
-                partitionResults = new CopyOnWriteArrayList<>(YAFPS.waitForCompletableFuturesAndCollect("Partition", partitionFutures, pollInf.sourceId())); // This YAFPF method is generic
+                partitionResults = new CopyOnWriteArrayList<>(ConcurrencyUtils.waitForCompletableFuturesAndCollect("Partition", partitionFutures, pollInf.sourceId())); // Changed to ConcurrencyUtils
                 sourceStatus = MetricsManager.determineOverallStatus(partitionResults, partitionsToProcess.size(), "Source", sourceName); // Use MetricsManager method
             } finally {
-                YAFPS.shutdownExecutorService(partitionExecutor, sourceName + "-PartitionExecutor"); // This YAFPF method is not metrics related
+                ConcurrencyUtils.shutdownExecutorService(partitionExecutor, sourceName + "-PartitionExecutor"); // Changed to ConcurrencyUtils
             }
             System.out.printf("Finished Data Source %s%n", sourceName);
             return new DataSourceInfo(pollInf.sourceId(), sourceName, sourceStatus, Duration.between(sourceStart, Instant.now()), currentThreadName, List.copyOf(partitionResults)); // Use MetricsManager type
@@ -108,6 +115,30 @@ public class DataSourceProcessor {
             return MetricsManager.createFailedDataSourceMetrics(config, new IOException("Failed to acquire lock file: " + lockFilePath, e)); // Use MetricsManager method
         } finally {
             System.out.printf("  Source %s: Released lock file %s%n", sourceName, lockFilePath); // This is fine
+        }
+    }
+
+    // Copied from YAFPS.java, made non-static and private
+    // Temporarily calling YAFPS.getDirectoriesAsPartition, will be FileUtils later
+    private List<Path> discoverPartitions(EtlPipelineItem conf, String sourceName) throws IOException {
+        SourceItem pollInf = conf.sources().getFirst();
+        Path sourceDirPath = pollInf.sourceDir();
+        if (!Files.isDirectory(sourceDirPath)) {
+            throw new IOException("Source directory does not exist: " + sourceDirPath);
+        }
+
+        if (pollInf.useSubDirAsPartition()) {
+            // TODO: Replace with FileUtils.getDirectoriesAsPartition once available
+            // For now, assuming YAFPS still has a static getDirectoriesAsPartition or it's a placeholder.
+            // This will likely cause a compile error if YAFPS.getDirectoriesAsPartition was removed and not yet in FileUtils.
+            // List<Path> foundPartitions = YAFPS.getDirectoriesAsPartition(pollInf.sourceDir(), pollInf.dirFilter());
+            // Placeholder call, assuming getDirectoriesAsPartition will be in FileUtils
+             List<Path> foundPartitions = FileUtils.getDirectoriesAsPartition(pollInf.sourceDir(), pollInf.dirFilter()); // Now uses import
+            System.out.printf("  Source %s: Found %d partitions matching '%s'.%n", sourceName, foundPartitions.size(), pollInf.dirFilter());
+            return foundPartitions;
+        } else {
+            System.out.printf("  Source %s: Processing '%s' as single partition.%n", sourceName, pollInf.sourceDir());
+            return List.of(sourceDirPath);
         }
     }
 }
