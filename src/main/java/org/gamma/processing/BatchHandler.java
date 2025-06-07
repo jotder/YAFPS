@@ -1,7 +1,8 @@
 package org.gamma.processing;
 
 import org.gamma.config.YamlSourceConfigAdapter;
-import org.gamma.processing.ProcessingResult; // Added import
+// import org.gamma.processing.ProcessingResult; // To be removed
+import org.gamma.metrics.MetricsManager; // Added import
 import org.gamma.datasources.AIRFileParser;
 import org.gamma.metrics.BatchMetrics;
 import org.gamma.metrics.LoadMetrics;
@@ -54,7 +55,7 @@ public class BatchHandler {
         }, batchExecutor)
                 // --- Stage 2: Load Phase (using Virtual Threads) ---
                 .thenComposeAsync(
-                        (ProcessingResult parseResults) -> loadPhase(parseResults, batchExecutor), // Changed type, removed extra params
+                        (MetricsManager.ProcessingResult parseResults) -> loadPhase(parseResults, batchExecutor), // Changed type
                         batchExecutor                                                               // Executor for the composition step itself
                 )
                 .exceptionally(ex -> handleProcessingException(ex, batchId, batchName));  // --- Handle Processing Phase Failure ---
@@ -64,7 +65,7 @@ public class BatchHandler {
     }
 
 
-    private CompletableFuture<BatchMetrics> loadPhase(ProcessingResult parseResults, ExecutorService completionExecutor) { // Changed type, removed extra params
+    private CompletableFuture<BatchMetrics> loadPhase(MetricsManager.ProcessingResult parseResults, ExecutorService completionExecutor) { // Changed type
         System.out.printf("      %s: Starting load phase (%d files) using virtual threads...%n", parseResults.batchName(), parseResults.filesToLoad().size()); // Reinstated
 
         final ExecutorService loadExecutor = Executors.newVirtualThreadPerTaskExecutor();
@@ -100,7 +101,7 @@ public class BatchHandler {
         }
     }
 
-    private BatchMetrics assembleBatchMetrics(ProcessingResult processingResult, List<CompletableFuture<LoadMetrics>> loadFutures) { // Changed type, removed extra params
+    private BatchMetrics assembleBatchMetrics(MetricsManager.ProcessingResult processingResult, List<CompletableFuture<LoadMetrics>> loadFutures) { // Changed type
         final List<LoadMetrics> loadResults = new ArrayList<>();
         Throwable firstLoadFailure = null;                              // Capture first failure for potential reporting
 

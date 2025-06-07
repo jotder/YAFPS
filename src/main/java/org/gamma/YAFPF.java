@@ -21,6 +21,7 @@ import java.nio.file.*;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
+import java.util.Collections; // Added import
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -289,9 +290,9 @@ public class YAFPF {
                                 filesToLoad.put(p.toString(), "table-" + (p.hashCode() % 2 + 1));
                             }
                             System.out.printf("      %s: Processing phase completed.%n", batchName);
-                            return new MetricsManager.ProcessingResult(batchId, batchName, batchStart, currentThreadName, batchData, filesToLoad); // Use MetricsManager type
+                            return new MetricsManager.ProcessingResult(batchId, batchName, batchStart, currentThreadName, batchData, filesToLoad, Collections.emptyList()); // Added missing argument
                         }, batchExecutor)
-                .thenComposeAsync(processingResult -> {
+                .thenComposeAsync((MetricsManager.ProcessingResult processingResult) -> { // Explicitly type lambda parameter
                     System.out.printf("      %s: Starting load phase (%d files) virtual threads...%n", processingResult.batchName(), processingResult.filesToLoad().size());
                     final ExecutorService loadExecutor = Executors.newVirtualThreadPerTaskExecutor();
                     // Use LoadTaskContext to keep fileName and tableName with the future
@@ -332,7 +333,7 @@ public class YAFPF {
     }
 
     private static MetricsManager.BatchInfo buildBatchMetricsFromLoadResults( // Changed to private, Use MetricsManager type
-            MetricsManager.ProcessingResult processingResult, // Use MetricsManager type
+            MetricsManager.ProcessingResult processingResult, // Type already correct from previous step
             List<MetricsManager.LoadTaskContext> loadTaskContexts) { // Use MetricsManager type
 
         final List<MetricsManager.LoadInfo> loadResults = new ArrayList<>(); // Use MetricsManager type
@@ -504,7 +505,7 @@ public class YAFPF {
             String pipelineName = pipelineItem.pipelineName();
         }
 
-        createDummyData(appConfig.etlPipelines()); // Pass List<EtlPipelineItem>
+        // createDummyData(appConfig.etlPipelines()); // Call moved to tests if needed
 
         final YAFPF executor = new YAFPF(appConfig); // Pass List<EtlPipelineItem>
 
@@ -551,42 +552,5 @@ public class YAFPF {
         System.out.println("----------------------------------------------------------");
     }
 
-    // --- Dummy Data Creation Helper ---
-    private static void createDummyData(List<EtlPipelineItem> configs) { // Parameter is List<EtlPipelineItem>
-        System.out.println("Creating dummy data directories/files for testing...");
-        for (EtlPipelineItem conf : configs) { // Iterates over EtlPipelineItem
-            SourceItem poll = conf.sources().getFirst(); //ToDo loop for multiple poll locations
-            Path sourcePath = poll.sourceDir();
-            try {
-                Files.createDirectories(sourcePath);
-                if (poll.useSubDirAsPartition()) {
-                    for (int p = 1; p <= 3; p++) {
-                        Path partPath = sourcePath.resolve("partition_" + p);
-                        Files.createDirectories(partPath);
-                        for (int f = 1; f <= 7; f++) {
-                            String filter = poll.fileFilter();
-                            String s = filter.contains("dat") ? ".dat" : filter.contains("txt") ? ".txt" : ".csv";
-                            Path filePath = partPath.resolve("file_" + f + s);
-                            if (!Files.exists(filePath)) Files.createFile(filePath);
-                        }
-                    }
-
-                    if (poll.dirFilter() != null && !poll.dirFilter().equals("*"))
-                        Files.createDirectories(sourcePath.resolve("ignored_partition"));
-
-                } else {
-                    for (int f = 1; f <= 5; f++) {
-                        String ext = poll.fileFilter().contains("dat") ? ".dat" : (poll.fileFilter().contains("txt") ? ".txt" : ".csv");
-                        Path filePath = sourcePath.resolve("base_file_" + f + ext);
-                        if (!Files.exists(filePath)) Files.createFile(filePath);
-                    }
-                    if (!Files.exists(sourcePath.resolve("ignored_file.log")))
-                        Files.createFile(sourcePath.resolve("ignored_file.log"));
-                }
-            } catch (IOException e) {
-                System.err.println("Warning: Could not create dummy data for " + poll.sourceDir() + ": " + e.getMessage());
-            }
-        }
-        System.out.println("Dummy data creation attempt finished.");
-    }
+    // --- Dummy Data Creation Helper --- (Moved to TestDataGenerator.java)
 }

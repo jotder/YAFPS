@@ -8,6 +8,7 @@ import static org.gamma.metrics.MetricsManager.*; // Import all static members
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections; // Added import
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -51,7 +52,7 @@ public class BatchProcessor {
                                 filesToLoad.put(p.toString(), "table-" + (p.hashCode() % 2 + 1));
                             }
                             System.out.printf("      %s: Processing phase completed.%n", batchName);
-                            return new MetricsManager.ProcessingResult(this.batchId, batchName, batchStart, currentThreadName, this.batchData, filesToLoad); // Explicitly use MetricsManager.ProcessingResult
+                            return new MetricsManager.ProcessingResult(this.batchId, batchName, batchStart, currentThreadName, this.batchData, filesToLoad, Collections.emptyList()); // Added emptyList for fileInfoList
                         }, this.batchExecutor)
                 .thenComposeAsync((MetricsManager.ProcessingResult processingResult) -> { // Explicitly type lambda parameter
                     System.out.printf("      %s: Starting load phase (%d files) virtual threads...%n", processingResult.batchName(), processingResult.filesToLoad().size());

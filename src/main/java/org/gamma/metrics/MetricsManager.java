@@ -48,8 +48,15 @@ public class MetricsManager {
     public static record ExecutionInfo(Duration totalDuration, List<DataSourceInfo> dataSourceInfo) {
     }
 
-    public static record ProcessingResult(int batchId, String batchName, Instant batchStart, String threadName,
-                                          List<Path> batchData, Map<String, String> filesToLoad) {
+    public static record ProcessingResult(
+        int batchId,
+        String batchName,
+        Instant batchStart,
+        String threadName,
+        List<Path> batchData, // Assuming Path is FQN or imported (it is)
+        Map<String, String> filesToLoad,
+        List<FileInfo> fileInfoList // New field (FileInfo is in same package)
+    ) {
     }
 
     public static record LoadTaskContext(String fileName, String tableName, CompletableFuture<LoadInfo> future) {
