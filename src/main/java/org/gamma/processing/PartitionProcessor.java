@@ -1,12 +1,10 @@
 package org.gamma.processing;
 
-import org.gamma.YAFPS;
 import org.gamma.config.EtlPipelineItem;
 import org.gamma.config.SourceItem;
-import org.gamma.metrics.MetricsManager;
-import org.gamma.util.ConcurrencyUtils; // Added import
-import org.gamma.util.FileUtils; // Added import
-import static org.gamma.metrics.MetricsManager.*;
+import org.gamma.metrics.*;
+import org.gamma.util.ConcurrencyUtils;
+import org.gamma.util.FileUtils;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -14,72 +12,63 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class PartitionProcessor {
 
-    // private final YAFPS YAFPSInstance; // No longer needed as BatchProcessor doesn't require it
     private final EtlPipelineItem config;
     private final String partitionId;
     private final Path partitionPath;
 
-    // Updated constructor, removed YAFPSInstance
     public PartitionProcessor(EtlPipelineItem config, String partitionId, Path partitionPath) {
-        // this.YAFPSInstance = YAFPSInstance;
         this.config = config;
         this.partitionId = partitionId;
         this.partitionPath = partitionPath;
     }
 
-    public PartitionInfo processPartition() { // Use MetricsManager.PartitionInfo (via static import)
+    public PartitionInfo processPartition() {
         final Instant partitionStart = Instant.now();
         final String threadName = Thread.currentThread().getName();
         System.out.printf("%n  Starting Partition %s for %s on T %s%n", this.partitionId, this.config.pipelineName(), threadName);
         SourceItem pollInf = this.config.sources().getFirst();
         List<List<Path>> fileBatches;
         try {
-            fileBatches = FileUtils.getFileBatches(this.partitionPath, this.config); // Changed to FileUtils
+            fileBatches = FileUtils.getFileBatches(this.partitionPath, this.config);
             System.out.printf("    Partition %s: Found %d files matching '%s', %d batches (fileBatchConcurrency=%d).%n",
                     this.partitionId, fileBatches.stream().mapToInt(List::size).sum(), pollInf.fileFilter(), fileBatches.size(), pollInf.numThreads());
         } catch (final IOException e) {
             System.err.printf("!!! FATAL: Failed to list/batch files for Partition %s: %s%n", this.partitionId, e.getMessage());
-            return MetricsManager.createFailedPartitionMetrics(pollInf.sourceId(), this.partitionId, e); // Use MetricsManager method
+            return StatusHelper.createFailedPartitionInfo(pollInf.sourceId(), this.partitionId, e);
         }
 
         if (fileBatches.isEmpty()) {
             System.out.printf("    Partition %s: No matching files. Skipping.%n", this.partitionId);
-            return new PartitionInfo(pollInf.sourceId(), this.partitionId, Status.PASS, Duration.ZERO, threadName, List.of()); // Use MetricsManager types
+            return new PartitionInfo(pollInf.sourceId(), this.partitionId, Status.PASS, Duration.ZERO, threadName, List.of());
         }
 
-        List<BatchInfo> batchResults; // Use MetricsManager.BatchInfo (via static import)
-        Status partitionStatus; // Use MetricsManager.Status (via static import)
+        List<BatchInfo> batchResults;
+        Status partitionStatus;
         final int concurrency = Math.max(1, pollInf.numThreads());
-        final ThreadFactory batchFactory = ConcurrencyUtils.createPlatformThreadFactory(threadName.replace("-Partition-", "-Batch-") + "-"); // Changed to ConcurrencyUtils
+        final ThreadFactory batchFactory = ConcurrencyUtils.createPlatformThreadFactory(threadName.replace("-Partition-", "-Batch-") + "-");
         final ExecutorService batchExecutor = Executors.newFixedThreadPool(concurrency, batchFactory);
-        final List<CompletableFuture<BatchInfo>> batchFutures = new ArrayList<>(); // Use MetricsManager.BatchInfo
+        final List<CompletableFuture<BatchInfo>> batchFutures = new ArrayList<>();
         final AtomicInteger batchCounter = new AtomicInteger(1);
 
         try {
             for (final List<Path> fileBatchData : fileBatches) {
-                if (fileBatchData.isEmpty()) continue;
-                final int currentBatchId = batchCounter.getAndIncrement();
-                // Instantiate BatchProcessor and call its processBatch method
-                // BatchProcessor.processBatch() will return CompletableFuture<MetricsManager.BatchInfo>
-                // Updated BatchProcessor instantiation
-                org.gamma.processing.BatchProcessor batchProc = new org.gamma.processing.BatchProcessor(this.config, currentBatchId, fileBatchData, batchExecutor);
+                if (fileBatchData.isEmpty())
+                    continue;
+                final String currentBatchId = "" + batchCounter.getAndIncrement();
+                BatchProcessor batchProc = new BatchProcessor(this.config, currentBatchId, fileBatchData, batchExecutor);
                 batchFutures.add(batchProc.processBatch());
             }
-            batchResults = new CopyOnWriteArrayList<>(ConcurrencyUtils.waitForCompletableFuturesAndCollect("Batch", batchFutures, this.partitionId)); // Changed to ConcurrencyUtils
-            partitionStatus = MetricsManager.determineOverallStatus(batchResults, batchFutures.size(), "Partition", this.partitionId); // Use MetricsManager method
+            batchResults = new CopyOnWriteArrayList<>(ConcurrencyUtils.waitForCompletableFuturesAndCollect("Batch", batchFutures, this.partitionId));
+            partitionStatus = StatusHelper.determineOverallStatus(batchResults, batchFutures.size(), "Partition", this.partitionId);
         } finally {
-            ConcurrencyUtils.shutdownExecutorService(batchExecutor, this.partitionId + "-BatchExecutor"); // Changed to ConcurrencyUtils
+            ConcurrencyUtils.shutdownExecutorService(batchExecutor, this.partitionId + "-BatchExecutor");
         }
         System.out.printf("  Finished Partition %s for Source %s%n", this.partitionId, pollInf.sourceId());
-        return new PartitionInfo(pollInf.sourceId(), this.partitionId, partitionStatus, Duration.between(partitionStart, Instant.now()), threadName, List.copyOf(batchResults)); // Use MetricsManager type
+        return new PartitionInfo(pollInf.sourceId(), this.partitionId, partitionStatus, Duration.between(partitionStart, Instant.now()), threadName, List.copyOf(batchResults));
     }
 }

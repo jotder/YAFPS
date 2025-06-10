@@ -20,16 +20,16 @@ public class StatusWriter {
     BufferedWriter statusWriter;
     BufferedWriter routeStatusWriter;
 
-    public StatusWriter(Path statusPath,  Path routeInfo, Logger logger) throws IOException {
-//        this.props = props;
+    public StatusWriter(Path statusPath, String statusTable, String routeTable, Logger logger) throws IOException {
         this.logger = logger;
-//        Path statusPath = props.fileInfo();
         Files.createDirectories(statusPath);
-        this.statusWriter = Files.newBufferedWriter(statusPath, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+
+        this.statusWriter = Files.newBufferedWriter(statusPath.resolve(statusTable), StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
         String s = "id, data_source, file_name, file_size, last_mod_ts, parse_count, fail_count, file_type, task, start_ts, duration, status, record_start, record_end, message\n";
         this.statusWriter.write(s);
         this.statusWriter.flush();
-        this.routeStatusWriter = Files.newBufferedWriter(routeInfo, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+
+        this.routeStatusWriter = Files.newBufferedWriter(statusPath.resolve(routeTable), StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
         String routeHeader = "id, dataSource, srcFileID, srcFileName, destFileID, destFileName, count, message\n";
         this.routeStatusWriter.write(routeHeader);
         this.routeStatusWriter.flush();

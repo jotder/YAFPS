@@ -1,10 +1,11 @@
 package org.gamma.processing;
 
-import org.gamma.config.YamlSourceConfigAdapter;
-import org.gamma.metrics.DataSourceMetrics;
-import org.gamma.metrics.StatusHelper;
-import org.gamma.metrics.PartitionMetrics;
+import org.gamma.config.EtlPipelineItem;
+import org.gamma.config.SourceItem;
+import org.gamma.metrics.DataSourceInfo;
+import org.gamma.metrics.PartitionInfo;
 import org.gamma.metrics.Status;
+import org.gamma.metrics.StatusHelper;
 import org.gamma.util.ConcurrencyUtils;
 import org.gamma.util.Utils;
 
@@ -26,9 +27,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public class DataSourceHandler {
 
-    private final YamlSourceConfigAdapter config;
+    private final EtlPipelineItem config;
 
-    public DataSourceHandler(YamlSourceConfigAdapter config) {
+    public DataSourceHandler(EtlPipelineItem config) {
         this.config = Objects.requireNonNull(config);
     }
 
@@ -36,49 +37,51 @@ public class DataSourceHandler {
      * Processes the data source. Intended to be called asynchronously.
      * Handles locking and manages partition processing.
      */
-    public DataSourceMetrics process() throws IOException {
+    public DataSourceInfo process() throws IOException {
         final Instant sourceStart = Instant.now();
-        final String sourceName = "%s".formatted(config.sourceName());
+        final String sourceName = "%s".formatted(config.pipelineName());
         final String currentThreadName = Thread.currentThread().getName();
-        final Path sourceDirPath = config.sourceDir();
+        final Path sourceDirPath = config.statusDir();
         System.out.printf("%nProcessing Data Source : %s on Thread %s%n", sourceName, currentThreadName);
+
+        SourceItem cnf = config.sources().getFirst();
 
         List<Path> partitions;
         try {
-            if (config.isDirAsPartition()) {
-                partitions = Utils.getDirectoriesAsPartition(config.sourceDir(), config.dirFilter());
+            if (cnf.useSubDirAsPartition()) {
+                partitions = Utils.getDirectoriesAsPartition(cnf.sourceDir(), cnf.dirFilter());
                 System.out.printf("  Source %s: Found %d partition directories matching '%s'.%n",
-                        sourceName, partitions.size(), config.dirFilter());
+                        sourceName, partitions.size(), cnf.dirFilter());
             } else {
                 partitions = List.of(sourceDirPath);
-                System.out.printf("  Source %s: Processing source directory '%s' as a single partition.%n", sourceName, config.sourceDir());
+                System.out.printf("  Source %s: Processing source directory '%s' as a single partition.%n", sourceName, cnf.sourceDir());
             }
         } catch (IOException e) {
             System.err.printf("!!! FATAL: Failed to list partitions for Source %s: %s%n", sourceName, e.getMessage());
-            return StatusHelper.createFailedDataSourceMetrics(config, e);
+            return StatusHelper.createFailedDataSourceInfo(config, e);
         }
 
-        if (partitions.isEmpty() && config.isDirAsPartition()) {
+        if (partitions.isEmpty() && cnf.useSubDirAsPartition()) {
             System.out.printf("  Source %s: No matching partition directories found. Skipping.%n", sourceName);
-            return new DataSourceMetrics(config.sourceID(), sourceName, Status.PASS, Duration.ZERO, currentThreadName, List.of());
+            return new DataSourceInfo(cnf.sourceId(), sourceName, Status.PASS, Duration.ZERO, currentThreadName, List.of());
         }
-        System.out.printf("  Source %s: Submitting %d partitions (batchSize=%d).%n", sourceName, partitions.size(), config.batchSize());
+        System.out.printf("  Source %s: Submitting %d partitions (batchSize=%d).%n", sourceName, partitions.size(), cnf.batchSize());
 
-        List<PartitionMetrics> partitionResults;
+        List<PartitionInfo> partitionResults;
         Status sourceStatus;
         int expectedPartitionCount = partitions.size();
 
-        final ExecutorService service = Executors.newFixedThreadPool(config.maxConcurrency(),
+        final ExecutorService service = Executors.newFixedThreadPool(cnf.numThreads(),
                 ConcurrencyUtils.createPlatformThreadFactory(sourceName + "-partition-"));
 
-        List<CompletableFuture<PartitionMetrics>> partitionFutures = new ArrayList<>();
+        List<CompletableFuture<PartitionInfo>> partitionFutures = new ArrayList<>();
         AtomicInteger counter = new AtomicInteger(1);
         try {
             for (Path path : partitions) {
                 String partitionId = path.getFileName() + "_" + counter.getAndIncrement();
 
                 PartitionHandler handler = new PartitionHandler(config, partitionId, path);
-                CompletableFuture<PartitionMetrics> partitionFuture = CompletableFuture.supplyAsync(
+                CompletableFuture<PartitionInfo> partitionFuture = CompletableFuture.supplyAsync(
                         () -> {
                             try {
                                 return handler.handle(partitions.size()); // Call the process method
@@ -86,7 +89,7 @@ public class DataSourceHandler {
                                 System.err.printf("! Exception processing partition %s for source %s: %s%n", partitionId, sourceName, e.getMessage());
                                 e.printStackTrace(System.err);
                                 // Create failed metrics if the processor itself threw unexpectedly
-                                return StatusHelper.createFailedPartitionMetrics(config.sourceID(), partitionId, e);
+                                return StatusHelper.createFailedPartitionInfo(cnf.sourceId(), partitionId, e);
                             }
                         },
                         service
@@ -95,7 +98,7 @@ public class DataSourceHandler {
             }
 
             partitionResults = new CopyOnWriteArrayList<>(ConcurrencyUtils.waitForCompletableFuturesAndCollect("Partition",
-                    partitionFutures, config.sourceID()));
+                    partitionFutures, cnf.sourceId()));
             sourceStatus = StatusHelper.determineOverallStatus(partitionResults, expectedPartitionCount, "Source", sourceName);
 
         } finally {
@@ -109,12 +112,12 @@ public class DataSourceHandler {
         if (sourceStatus == Status.FAIL) {
             failureCause = partitionResults.stream()
                     .filter(p -> p.status() == Status.FAIL && p.failureCause() != null)
-                    .map(PartitionMetrics::failureCause)
+                    .map(PartitionInfo::failureCause)
                     .findFirst()
                     .orElse(new RuntimeException("Source failed due to incomplete partition processing or sub-task failure."));
         }
 
-        return new DataSourceMetrics(config.sourceID(), sourceName, sourceStatus,
+        return new DataSourceInfo(config.sources().getFirst().sourceId(), sourceName, sourceStatus,
                 Duration.between(sourceStart, Instant.now()), currentThreadName, List.copyOf(partitionResults), failureCause);
     }
 }

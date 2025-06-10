@@ -5,7 +5,7 @@ import org.gamma.metrics.FileInfo;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Path;
-import java.util.logging.*;
+import java.util.logging.Logger;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 

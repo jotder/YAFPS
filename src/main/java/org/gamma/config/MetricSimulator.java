@@ -4,8 +4,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
 
-// Moved from ConfigManager.java / ConfigSimulation.java to main sources
-// as AutoTuner (in main) depends on it.
+// ConfigSimulation.java to main sources as AutoTuner (in main) depends on it.
 public class MetricSimulator { // Made public for access from AutoTuner and potentially test simulations
     private static final Logger LOGGER = Logger.getLogger(MetricSimulator.class.getName());
     private double currentCpuLoad = 30.0;

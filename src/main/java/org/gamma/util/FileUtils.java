@@ -4,7 +4,10 @@ import org.gamma.config.EtlPipelineItem;
 import org.gamma.config.SourceItem;
 
 import java.io.IOException;
-import java.nio.file.*;
+import java.nio.file.FileSystems;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.PathMatcher;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -33,7 +36,7 @@ public class FileUtils {
         }
     }
 
-    public static List<List<Path>> getFileBatches(final Path partitionPath, final EtlPipelineItem conf) throws IOException { // Parameter is EtlPipelineItem
+    public static List<List<Path>> getFileBatches(final Path partitionPath, final EtlPipelineItem conf) throws IOException {
         SourceItem pollInf = conf.sources().getFirst();
         final List<Path> pathList = listFiles(partitionPath, pollInf.fileFilter());
         final int numBuckets = Math.max(1, pollInf.numThreads()); // Uses conf.concurrency()

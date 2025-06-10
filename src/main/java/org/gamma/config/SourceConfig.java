@@ -1,9 +1,6 @@
 package org.gamma.config;
 
-import org.apache.avro.Schema; // Import Avro Schema
-// Potentially import your RecordReaderFactory interface if SourceConfig is to provide it
-// import com.gamma.processing.record.RecordReaderFactory;
-// import com.gamma.processing.record.CsvRecordReaderFactory; // Example implementation
+import org.apache.avro.Schema;
 
 import java.io.File;
 import java.io.IOException;

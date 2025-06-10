@@ -1,11 +1,10 @@
 package org.gamma.processing;
 
-import org.gamma.config.YamlSourceConfigAdapter;
-// import org.gamma.processing.BatchProcessor; // No longer needed as ProcessingResult is top-level
-// import org.gamma.processing.ProcessingResult; // Will use MetricsManager.ProcessingResult
-import org.gamma.metrics.MetricsManager; // Added import
-import org.gamma.metrics.FileInfo; // Ensure this is imported for fileInfoList
-import org.gamma.metrics.RouteInfo;
+
+import org.gamma.config.EtlPipelineItem;
+import org.gamma.config.SourceItem;
+import org.gamma.metrics.FileInfo;
+import org.gamma.metrics.ProcessingResult;
 import org.gamma.metrics.Status;
 import org.gamma.metrics.StatusHelper;
 import org.gamma.plugin.FileParser;
@@ -28,21 +27,22 @@ import static org.gamma.util.Utils.escapeCsvField;
 
 
 public abstract class AbstractBatchFileParser implements FileParser {
+    private static final int SIMULATED_PROCESSING_FAILURE_MODULO = 10;
+//    protected final EtlPipelineItem config;
+    public MatrixBuilder matrixHandler = null;
+    protected Logger logger;
     Path outDir;
-    String dims;
-    String measures;
+//    String dims;
+//    String measures;
     String option;
     Path matrixFilePath;
-    public MatrixBuilder matrixHandler = null;
-    // private final SourceConfig config; // OLD
-    protected final YamlSourceConfigAdapter config; // NEW
-    protected Logger logger; // Made protected
-
-    public AbstractBatchFileParser(YamlSourceConfigAdapter config) { // Constructor name fixed
-        this.outDir = config.outputDir();
-        this.dims = config.getDimensions();
-        this.measures = config.getMeasures();
-        this.option = config.getOptions();
+    public SourceItem config;
+    public AbstractBatchFileParser(EtlPipelineItem conf) {
+        this.config = conf.sources().getFirst();
+        this.outDir = config.outDir();
+//        this.dims = config.getDimensions();
+//        this.measures = config.getMeasures();
+//        this.option = config.getOptions();
         this.matrixFilePath = outDir.resolve("matrix");
         this.config = config;
     }
@@ -57,31 +57,29 @@ public abstract class AbstractBatchFileParser implements FileParser {
         return logger;
     }
 
-    // Keep simulation constants here or move elsewhere
-    private static final int SIMULATED_PROCESSING_FAILURE_MODULO = 10;
-
-    // ProcessingResult is now a top-level class: org.gamma.processing.ProcessingResult - comment to be removed or updated
-
-    public MetricsManager.ProcessingResult processPhase(int batchId, String batchName, List<Path> paths) throws // Return type changed
+    public ProcessingResult processPhase(String batchId, String batchName, List<Path> paths) throws
             IOException {
-        Instant batchStart = Instant.now(); // Reinstated
-        String currentThreadName = Thread.currentThread().getName(); // Reinstated
+        Instant batchStart = Instant.now();
+        String currentThreadName = Thread.currentThread().getName();
 
         System.out.printf("      %s: Starting processing phase on T %s...%n", batchName, currentThreadName);
 
-        String outFileName = "out" + config.sourceName() + Math.random() + ".csv";
+        String outFileName = "out" + config.sourceId() + Math.random() + ".csv";
         try {
             outFileName = createOutFileName(paths);
         } catch (Exception e) {
             e.printStackTrace();
         }
 
-        Files.createDirectories(matrixFilePath);
-        if ("ALL".equals(option) || "MATRIX".equals(option))
-            matrixHandler = new MatrixBuilder(dims, measures, matrixFilePath + File.separator + "sum_" + outFileName, config.isOutFileHeader());
+//        Files.createDirectories(matrixFilePath);
+//        if ("ALL".equals(option) || "MATRIX".equals(option))
+//            matrixHandler = new MatrixBuilder(dims, measures, matrixFilePath + File.separator + "sum_" + outFileName, config.isOutFileHeader());
 
-        List<String> txFieldNames = config.getFieldsNames("TX");
-        boolean keepHeader = config.isOutFileHeader();
+//        List<String> txFieldNames = config.getFieldsNames("TX");
+
+        List<String> txFieldNames = List.of("??"); //ToDo
+
+        boolean keepHeader = config.keepFileHeader();
 
         BatchMergeSplitWriter batchHandler = new BatchMergeSplitWriter(outDir, outFileName, txFieldNames, option, keepHeader);
         String recStart = "";
@@ -90,7 +88,6 @@ public abstract class AbstractBatchFileParser implements FileParser {
         long totBadRecCount = 0L;
 
         List<FileInfo> fileInfoList = new ArrayList<>();
-        // List<RouteInfo> routeInfList = new ArrayList<>(); // Commented out if not used for Map return
 
         for (Path path : paths) {
             try {
@@ -100,17 +97,17 @@ public abstract class AbstractBatchFileParser implements FileParser {
                 fileInfoList.add(info);
                 List<List<Map.Entry<String, Map<String, Long>>>> routeInfo = batchHandler.getRouteStatus(info.fileName());
 
-//                long x = routeInfo.values().stream().mapToLong(Long::longValue).sum();
-//                if (x != info.recCount() - info.failCount())
-//                    System.out.println("ERROR : pass - fail != sum of routed ! " + x + " " + info.recCount() + " " + info.failCount());
+//              long x = routeInfo.values().stream().mapToLong(Long::longValue).sum();
+//              if (x != info.recCount() - info.failCount())
+//              System.out.println("ERROR : pass - fail != sum of routed ! " + x + " " + info.recCount() + " " + info.failCount());
 
                 String msg = info.fileName();
                 String m = "\t-> " + msg + ":\t\t\t\t\t" + info.recCount() + "\t\t" + info.failCount() + "\t\t" + info.duration() + "\t\t" + info.status();
                 System.out.println(m);
                 logger.log(Level.WARNING, m);
 
-//                routeInfo.forEach((edge, count) ->
-//                        routeInfList.add(StatusHelper.createRouteRecord(config.getSourceName(), edge.srcFile(), edge.outFile(), count)));
+//              routeInfo.forEach((edge, count) ->
+//              routeInfList.add(StatusHelper.createRouteRecord(config.getSourceName(), edge.srcFile(), edge.outFile(), count)));
 
                 if (info.recordStart().compareTo(recStart) > 0)
                     recStart = info.recordStart();
@@ -135,7 +132,7 @@ public abstract class AbstractBatchFileParser implements FileParser {
 
                     recordCount.set(recordCount.get() + cw.getRecordCount());
 
-                    FileInfo merged = StatusHelper.createMergedRecord(config.sourceName(), cw);
+                    FileInfo merged = StatusHelper.createMergedRecord(config.sourceId(), cw);
 
                     fileInfoList.add(merged);
                     PrintStream printStream = System.out;
@@ -154,15 +151,15 @@ public abstract class AbstractBatchFileParser implements FileParser {
                 matrixHandler.writeMatrix();
                 matrixHandler.close();
 
-                //                FileInfo mfi = Utils.UtilsgetFileInf(dataSource, Path.of(matrixFilePath + File.separator + "sum_" + outFileName));
+                // FileInfo mfi = Utils.UtilsgetFileInf(dataSource, Path.of(matrixFilePath + File.separator + "sum_" + outFileName));
 
-                String matrixTable = config.getMatrixTableName();
-                boolean matrixLoading = config.isMatrixLoad();
-                if (matrixLoading) {
-                    statusWriter.loadDataToDatabase(matrixHandler.fileUrl, matrixTable);
-                    FileInfo mLoadStatus = StatusHelper.createMatricesInfo();//
-                    fileInfoList.add(mLoadStatus);
-                }
+//                String matrixTable = config.getMatrixTableName();
+//                boolean matrixLoading = config.isMatrixLoad();
+//                if (matrixLoading) {
+//                    statusWriter.loadDataToDatabase(matrixHandler.fileUrl, matrixTable);
+//                    FileInfo mLoadStatus = StatusHelper.createMatricesInfo();//
+//                    fileInfoList.add(mLoadStatus);
+//                }
             }
 
             statusWriter.insertFileStatus(fileInfoList);
@@ -176,7 +173,6 @@ public abstract class AbstractBatchFileParser implements FileParser {
 
 //        return fileInfoList;
 
-
 //        final Map<String, String> filesToParse = new LinkedHashMap<>();
 //        try {
 //            for (Path p : paths) {
@@ -188,17 +184,18 @@ public abstract class AbstractBatchFileParser implements FileParser {
 //            throw new RuntimeException(e);
 //        }
 
-        if (batchId % SIMULATED_PROCESSING_FAILURE_MODULO == 0)
-            throw new RuntimeException("Simulated processing failure in " + batchName);
+//        if (batchId % SIMULATED_PROCESSING_FAILURE_MODULO == 0)
+//            throw new RuntimeException("Simulated processing failure in " + batchName);
 
         // Simulate work (replace with actual logic)
-        final Map<String, String> filesToLoad = new LinkedHashMap<>(); // Reinstated
-        for (Path p : paths) { // Reinstated
-            filesToLoad.put(p.toString(), "table-" + (p.hashCode() % 2 + 1)); // Reinstated
+        final Map<String, String> filesToLoad = new LinkedHashMap<>();
+        for (Path p : paths) {
+            filesToLoad.put(p.toString(), "table-" + (p.hashCode() % 2 + 1));
         }
 
 //        System.out.printf("      %s: Processing phase completed successfully.%n", batchName);
-        return new MetricsManager.ProcessingResult(batchId, batchName, batchStart, currentThreadName, paths, filesToLoad, fileInfoList); // Use MetricsManager.ProcessingResult
+        return new ProcessingResult(batchId, batchName, batchStart,
+                currentThreadName, paths, filesToLoad, fileInfoList);
     }
 
     public abstract String createOutFileName(List<Path> paths);
@@ -253,8 +250,8 @@ public abstract class AbstractBatchFileParser implements FileParser {
                             List<String> srcFields = this.parseLine(line, escapeEnclosed, '\'');
                             ++parseCount;
 
-                            if (srcFields.size() != config.srcFieldSize())
-                                throw new Exception("Invalid record with field count " + srcFields.size());
+//                            if (srcFields.size() != config.srcFieldSize()) //ToDo
+//                                throw new Exception("Invalid record with field count " + srcFields.size());
 
                             String fileName = path.toFile().getName();
                             Map<String, Object> rec = enrich(srcFields, parseCount, fileName);
@@ -263,7 +260,8 @@ public abstract class AbstractBatchFileParser implements FileParser {
 
                             String partition = this.getPartition(rec);
 
-                            List<String> txMD = config.getFieldsNames("TX");
+                            List<String> txMD;// = config.getFieldsNames("TX"); ToDo
+                            txMD = List.of("???");
                             batchMergeSplitWriter.write(fileName, partition, rec, txMD);
 
                             String seqFld = this.getRecSortIndicatorFld();
@@ -361,9 +359,10 @@ public abstract class AbstractBatchFileParser implements FileParser {
                                       + path.toFile().getName());
 
         long duration = Duration.between(startMoment, Instant.now()).toSeconds();
-        return StatusHelper.createFileInfo(path, config.sourceName(), parseCount, failCount, Timestamp.from(startMoment),
+        return StatusHelper.createFileInfo(path, config.sourceId(), parseCount, failCount, Timestamp.from(startMoment),
                 duration, Status.PASS, startRecord, endRecord, errorMsg);
     }
+
 //    Path path, String dataSource, long parseCount, long failCount,  Timestamp startTime, int duration,
 //    Status status, String startRecord,String endRecord, String fileErrorMsg
 

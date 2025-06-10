@@ -2,8 +2,9 @@ package org.gamma;
 
 import org.gamma.config.AppConfig;
 import org.gamma.config.EtlPipelineItem;
-import org.gamma.metrics.MetricsManager;
-import org.gamma.processing.DataSourceProcessor; // Not directly mocked, but its interaction is part of the flow
+import org.gamma.metrics.DataSourceInfo;
+import org.gamma.metrics.ExecutionInfo;
+import org.gamma.metrics.Status;
 import org.gamma.util.ConcurrencyUtils;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -15,18 +16,12 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadFactory; // For mocking createPlatformThreadFactory return type
+import java.util.concurrent.ThreadFactory;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyList;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.isNull;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -54,9 +49,9 @@ class YAFPSTest {
         yafpsInstance = new YAFPS(mockAppConfig);
     }
 
-    private MetricsManager.DataSourceInfo createDummyDsInfo(String sourceName, MetricsManager.Status status) {
-        return new MetricsManager.DataSourceInfo(sourceName + "_id", sourceName, status, Duration.ofSeconds(1), "thread-ds", Collections.emptyList(),
-                status == MetricsManager.Status.FAIL ? new Throwable("Simulated DS fail for " + sourceName) : null);
+    private DataSourceInfo createDummyDsInfo(String sourceName, Status status) {
+        return new DataSourceInfo(sourceName + "_id", sourceName, status, Duration.ofSeconds(1), "thread-ds", Collections.emptyList(),
+                status == Status.FAIL ? new Throwable("Simulated DS fail for " + sourceName) : null);
     }
 
     @Test
@@ -64,8 +59,8 @@ class YAFPSTest {
         when(mockAppConfig.etlPipelines()).thenReturn(List.of(mockEtlItem1, mockEtlItem2)); // Explicitly set for this test
         yafpsInstance = new YAFPS(mockAppConfig); // Re-initialize with specific config for this test
 
-        MetricsManager.DataSourceInfo dsInfo1 = createDummyDsInfo("pipe1", MetricsManager.Status.PASS);
-        MetricsManager.DataSourceInfo dsInfo2 = createDummyDsInfo("pipe2", MetricsManager.Status.PASS);
+        DataSourceInfo dsInfo1 = createDummyDsInfo("pipe1", Status.PASS);
+        DataSourceInfo dsInfo2 = createDummyDsInfo("pipe2", Status.PASS);
 
         // Use try-with-resources for MockedStatic
         try (MockedStatic<ConcurrencyUtils> mockedConcurrencyUtils = mockStatic(ConcurrencyUtils.class);
@@ -76,28 +71,28 @@ class YAFPSTest {
 
             // Stubbing the static factory methods
             mockedExecutors.when(() -> Executors.newFixedThreadPool(anyInt(), any(ThreadFactory.class)))
-                           .thenReturn(mockExecutorService);
+                    .thenReturn(mockExecutorService);
             mockedConcurrencyUtils.when(() -> ConcurrencyUtils.createPlatformThreadFactory(anyString()))
-                               .thenReturn(mockThreadFactory);
+                    .thenReturn(mockThreadFactory);
 
             // This is the key mock: define what the collection of futures will return.
             mockedConcurrencyUtils.when(() -> ConcurrencyUtils.waitForCompletableFuturesAndCollect(
-                                            eq("DataSource"),
-                                            anyList(),
-                                            isNull()
-                                        ))
-                               .thenAnswer(invocation -> {
-                                   List<?> futuresPassed = invocation.getArgument(1);
-                                   assertEquals(2, futuresPassed.size(), "Should have received 2 futures for processing.");
-                                   // Simulate that these futures (which would wrap DataSourceProcessor calls) resolve to our mock data
-                                   return List.of(dsInfo1, dsInfo2);
-                               });
+                            eq("DataSource"),
+                            anyList(),
+                            isNull()
+                    ))
+                    .thenAnswer(invocation -> {
+                        List<?> futuresPassed = invocation.getArgument(1);
+                        assertEquals(2, futuresPassed.size(), "Should have received 2 futures for processing.");
+                        // Simulate that these futures (which would wrap DataSourceProcessor calls) resolve to our mock data
+                        return List.of(dsInfo1, dsInfo2);
+                    });
 
             mockedConcurrencyUtils.when(() -> ConcurrencyUtils.shutdownExecutorService(any(ExecutorService.class), anyString()))
-                               .thenAnswer(inv -> null); // Do nothing for shutdown in test
+                    .thenAnswer(inv -> null); // Do nothing for shutdown in test
 
 
-            MetricsManager.ExecutionInfo execInfo = yafpsInstance.execute();
+            ExecutionInfo execInfo = yafpsInstance.execute();
 
             assertNotNull(execInfo);
             assertEquals(2, execInfo.dataSourceInfo().size());
@@ -123,21 +118,21 @@ class YAFPSTest {
 
             // Adjust concurrency expectation for no pipelines. Max(1,0) = 1.
             mockedExecutors.when(() -> Executors.newFixedThreadPool(eq(1), any(ThreadFactory.class)))
-                           .thenReturn(mockExecutorService);
+                    .thenReturn(mockExecutorService);
             mockedConcurrencyUtils.when(() -> ConcurrencyUtils.createPlatformThreadFactory(anyString()))
-                               .thenReturn(mockThreadFactory);
+                    .thenReturn(mockThreadFactory);
 
             // waitForCompletableFuturesAndCollect will be called with an empty list of futures.
             mockedConcurrencyUtils.when(() -> ConcurrencyUtils.waitForCompletableFuturesAndCollect(eq("DataSource"), anyList(), isNull()))
-                               .thenAnswer(invocation -> {
-                                   List<?> futures = invocation.getArgument(1);
-                                   assertTrue(futures.isEmpty(), "Future list should be empty.");
-                                   return Collections.emptyList();
-                               });
-             mockedConcurrencyUtils.when(() -> ConcurrencyUtils.shutdownExecutorService(any(ExecutorService.class), anyString()))
-                               .thenAnswer(inv -> null);
+                    .thenAnswer(invocation -> {
+                        List<?> futures = invocation.getArgument(1);
+                        assertTrue(futures.isEmpty(), "Future list should be empty.");
+                        return Collections.emptyList();
+                    });
+            mockedConcurrencyUtils.when(() -> ConcurrencyUtils.shutdownExecutorService(any(ExecutorService.class), anyString()))
+                    .thenAnswer(inv -> null);
 
-            MetricsManager.ExecutionInfo execInfo = yafpsInstance.execute();
+            ExecutionInfo execInfo = yafpsInstance.execute();
 
             assertNotNull(execInfo);
             assertTrue(execInfo.dataSourceInfo().isEmpty());
@@ -151,7 +146,7 @@ class YAFPSTest {
         when(mockAppConfig.etlPipelines()).thenReturn(List.of(mockEtlItem1)); // Only one item
         yafpsInstance = new YAFPS(mockAppConfig);
 
-        MetricsManager.DataSourceInfo failedDsInfo = createDummyDsInfo("pipe1", MetricsManager.Status.FAIL);
+        DataSourceInfo failedDsInfo = createDummyDsInfo("pipe1", Status.FAIL);
 
         try (MockedStatic<ConcurrencyUtils> mockedConcurrencyUtils = mockStatic(ConcurrencyUtils.class);
              MockedStatic<Executors> mockedExecutors = mockStatic(Executors.class)) {
@@ -160,31 +155,31 @@ class YAFPSTest {
             ThreadFactory mockThreadFactory = mock(ThreadFactory.class);
 
             mockedExecutors.when(() -> Executors.newFixedThreadPool(anyInt(), any(ThreadFactory.class)))
-                           .thenReturn(mockExecutorService);
+                    .thenReturn(mockExecutorService);
             mockedConcurrencyUtils.when(() -> ConcurrencyUtils.createPlatformThreadFactory(anyString()))
-                               .thenReturn(mockThreadFactory);
+                    .thenReturn(mockThreadFactory);
 
             mockedConcurrencyUtils.when(() -> ConcurrencyUtils.waitForCompletableFuturesAndCollect(eq("DataSource"), anyList(), isNull()))
-                               .thenAnswer(invocation -> {
-                                   List<?> futures = invocation.getArgument(1);
-                                   assertEquals(1, futures.size());
-                                   return List.of(failedDsInfo); // Simulate this one future resolving to a failed DataSourceInfo
-                               });
+                    .thenAnswer(invocation -> {
+                        List<?> futures = invocation.getArgument(1);
+                        assertEquals(1, futures.size());
+                        return List.of(failedDsInfo); // Simulate this one future resolving to a failed DataSourceInfo
+                    });
             mockedConcurrencyUtils.when(() -> ConcurrencyUtils.shutdownExecutorService(any(ExecutorService.class), anyString())).thenAnswer(inv -> null);
 
-            MetricsManager.ExecutionInfo execInfo = yafpsInstance.execute();
+            ExecutionInfo execInfo = yafpsInstance.execute();
 
             assertNotNull(execInfo);
             assertEquals(1, execInfo.dataSourceInfo().size());
             assertTrue(execInfo.dataSourceInfo().contains(failedDsInfo));
-            assertEquals(MetricsManager.Status.FAIL, execInfo.dataSourceInfo().getFirst().status());
+            assertEquals(Status.FAIL, execInfo.dataSourceInfo().getFirst().status());
         }
     }
 
     @Test
     void testConstructor_nullConfig() {
         assertThrows(NullPointerException.class, () -> new YAFPS(null),
-                     "Constructor should throw NullPointerException if AppConfig is null.");
+                "Constructor should throw NullPointerException if AppConfig is null.");
     }
 
     @Test
@@ -194,7 +189,7 @@ class YAFPSTest {
         // If capturing output was critical, a library like System Rules or custom setup would be needed.
         when(mockAppConfig.etlPipelines()).thenReturn(Collections.emptyList());
         assertDoesNotThrow(() -> new YAFPS(mockAppConfig),
-                           "Constructor should handle empty ETL pipelines list without throwing an exception.");
+                "Constructor should handle empty ETL pipelines list without throwing an exception.");
         // To verify the warning, one might need to redirect System.err, which is more involved.
     }
 }

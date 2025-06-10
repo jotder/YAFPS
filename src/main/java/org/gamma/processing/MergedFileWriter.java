@@ -11,13 +11,14 @@ import java.util.Map;
 
 public class MergedFileWriter implements AutoCloseable {
     private final BufferedWriter writer;
-    private long recordCount = 0L;
     private final Instant startTime;
-    private Instant endTime;
-    private boolean closed = false;
     public Path mFlePath;
+    public Map<String, Long> edgeStatus = new LinkedHashMap<>();
     //    String dataSource;
     String mergedFileName;
+    private long recordCount = 0L;
+    private Instant endTime;
+    private boolean closed = false;
 
     public MergedFileWriter(Path mFlePath, List<String> headerFields, boolean keepHeader) throws Exception {
 //        this.dataSource = dataSource;
@@ -41,8 +42,6 @@ public class MergedFileWriter implements AutoCloseable {
     public boolean isClosed() {
         return !this.closed;
     }
-
-    public Map<String, Long> edgeStatus = new LinkedHashMap<>();
 
     public void writeLine(String sFileName, String line) throws IOException {
         if (this.closed) {

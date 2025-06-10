@@ -56,7 +56,17 @@ public class MatrixBuilder implements AutoCloseable {
         }
     }
 
+    private static ArrayList<Number> getUpdatedCounter(List<Number> counter, List<String> measures) throws Exception {
+        ArrayList<Number> uCounter = new ArrayList<>(measures.size() + 1);
+        uCounter.add((Long) counter.getFirst() + 1L);
 
+        for (int i = 0; i < measures.size(); ++i) {
+            double x = (Double) counter.get(i + 1) + getNumber((String) measures.get(i));
+            uCounter.add(x);
+        }
+
+        return uCounter;
+    }
 
     public String asCSV() {
         StringBuilder csv = new StringBuilder();
@@ -109,18 +119,6 @@ public class MatrixBuilder implements AutoCloseable {
             this.summaryMatrix.put(keyAsCSV, uCounter);
         }
 
-    }
-
-    private static ArrayList<Number> getUpdatedCounter(List<Number> counter, List<String> measures) throws Exception {
-        ArrayList<Number> uCounter = new ArrayList<>(measures.size() + 1);
-        uCounter.add((Long) counter.getFirst() + 1L);
-
-        for (int i = 0; i < measures.size(); ++i) {
-            double x = (Double) counter.get(i + 1) + getNumber((String) measures.get(i));
-            uCounter.add(x);
-        }
-
-        return uCounter;
     }
 
     public void writeMatrix() throws IOException {

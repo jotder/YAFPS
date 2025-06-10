@@ -91,14 +91,6 @@ public final class Utils {
 
     }
 
-    String escapeCsv(String value) {
-        if (value == null) {
-            return "";
-        } else {
-            return !value.contains(",") && !value.contains("\n") && !value.contains("\"") ? value : "\"" + value.replace("\"", "\"\"") + "\"";
-        }
-    }
-
     /**
      * Distributes a list of files into a number of batches determined by concurrency,
      * using round-robin assignment.
@@ -153,6 +145,12 @@ public final class Utils {
         return input != null && input.startsWith("\"") && input.endsWith("\"") ? input.substring(1, input.length() - 1) : input;
     }
 
+    public static String getFileID(String dataSource, String filename) {
+        CRC32 crc = new CRC32();
+        crc.update((dataSource + filename).getBytes());
+        return String.valueOf(crc.getValue());
+    }
+
 //    static Models.PollFileInf getFileInf(String dataSource, Path filePath) throws Exception {
 //        String fileName = filePath.toFile().getName();
 //        File f = filePath.toFile();
@@ -161,10 +159,12 @@ public final class Utils {
 //        return new Models.PollFileInf(fileID, dataSource, fileName, f.length(), lastModified, f.getCanonicalPath());
 //    }
 
-    public static String getFileID(String dataSource, String filename) {
-        CRC32 crc = new CRC32();
-        crc.update((dataSource + filename).getBytes());
-        return String.valueOf(crc.getValue());
+    String escapeCsv(String value) {
+        if (value == null) {
+            return "";
+        } else {
+            return !value.contains(",") && !value.contains("\n") && !value.contains("\"") ? value : "\"" + value.replace("\"", "\"\"") + "\"";
+        }
     }
 
 //    public static PollInfo getFileInf(String dataSource, Path filePath) throws Exception {
@@ -177,12 +177,12 @@ public final class Utils {
 
 //    static void backupBucket(List<Models.FileStatus> bktStatus) {
 //        Path backDir = Paths.get(this.getProperties().getProperty("BACKUP_DIR"));
-//        Path errDir = Paths.get(this.getProperties().getProperty("ERR_DIR"));
+//        Path errorDir = Paths.get(this.getProperties().getProperty("ERR_DIR"));
 //        boolean errBackup = Boolean.parseBoolean(this.getProperties().getProperty("ERR_BACKUP"));
 //
 //        try {
 //            Files.createDirectories(backDir);
-//            Files.createDirectories(errDir);
+//            Files.createDirectories(errorDir);
 //            bktStatus.forEach((fInf) -> {
 //                if (fInf.fileType().equalsIgnoreCase("SOURCE")) {
 //                    try {
@@ -191,7 +191,7 @@ public final class Utils {
 //                        String subDir = sourcePath.getName(sourcePath.getNameCount() - 2).toString();
 //                        Path targetPath;
 //                        if (!fInf.status().equalsIgnoreCase("PASS")) {
-//                            targetPath = Paths.get(errDir.toString(), subDir);
+//                            targetPath = Paths.get(errorDir.toString(), subDir);
 //                        } else {
 //                            targetPath = Paths.get(backDir.toString(), subDir);
 //                        }

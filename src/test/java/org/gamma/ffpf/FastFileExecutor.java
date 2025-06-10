@@ -1,9 +1,10 @@
-package org.gamma.processing;
+package org.gamma.ffpf;
 
-import org.gamma.config.YamlSourceConfigAdapter;
-import org.gamma.metrics.DataSourceMetrics;
-import org.gamma.metrics.ExecutionMetrics;
+import org.gamma.config.EtlPipelineItem;
+import org.gamma.metrics.DataSourceInfo;
+import org.gamma.metrics.ExecutionInfo;
 import org.gamma.metrics.StatusHelper;
+import org.gamma.processing.DataSourceHandler;
 import org.gamma.util.ConcurrencyUtils;
 
 import java.io.IOException;
@@ -24,7 +25,7 @@ import java.util.concurrent.*;
  */
 public class FastFileExecutor {
 
-    private final List<YamlSourceConfigAdapter> configs;
+    private final List<EtlPipelineItem> configs;
 
 
     /**
@@ -32,7 +33,7 @@ public class FastFileExecutor {
      *
      * @param configs List of configurations for the data sources to process.
      */
-    public FastFileExecutor(final List<YamlSourceConfigAdapter> configs) {
+    public FastFileExecutor(final List<EtlPipelineItem> configs) {
         this.configs = Objects.requireNonNull(configs, "Data source configurations cannot be null");
 
         if (configs.isEmpty()) System.err.println("Warning: No source configurations provided.");
@@ -41,9 +42,9 @@ public class FastFileExecutor {
     /**
      * Executes the processing for all configured data sources.
      *
-     * @return ExecutionMetrics containing results and timings.
+     * @return ExecutionInfo containing results and timings.
      */
-    public ExecutionMetrics execute() throws IOException {
+    public ExecutionInfo execute() throws IOException {
 
         final Path sourceDirPath = Paths.get(".");
         final Path lockFilePath = sourceDirPath.resolve(".executor.lock");
@@ -58,33 +59,33 @@ public class FastFileExecutor {
         }
 
         final Instant executionStart = Instant.now();
-        final List<DataSourceMetrics> metrics;
+        final List<DataSourceInfo> metrics;
 
         final int maxInstance = Math.max(1, configs.size());
         final ThreadFactory factory = ConcurrencyUtils.createPlatformThreadFactory("DataSource-");
         final ExecutorService execService = Executors.newFixedThreadPool(maxInstance, factory);
 
-        final List<CompletableFuture<DataSourceMetrics>> futures = new ArrayList<>();
+        final List<CompletableFuture<DataSourceInfo>> futures = new ArrayList<>();
 
         System.out.printf("%nStarting execution with %d concurrent data sources.%n", maxInstance);
 
         try {
-            for (YamlSourceConfigAdapter conf : configs) {
+            for (EtlPipelineItem conf : configs) {
 
                 final DataSourceHandler processor = new DataSourceHandler(conf);
-                final CompletableFuture<DataSourceMetrics> future = CompletableFuture.supplyAsync(() -> {
+                final CompletableFuture<DataSourceInfo> future = CompletableFuture.supplyAsync(() -> {
                             try {
                                 return processor.process();
                             } catch (final RuntimeException e) {
                                 System.err.printf("!!! Exception processing data source %s: %s%n",
-                                        conf.sourceName(), e.getMessage());
+                                        conf.pipelineName(), e.getMessage());
                                 e.printStackTrace(System.err);
-                                return StatusHelper.createFailedDataSourceMetrics(conf, e);
+                                return StatusHelper.createFailedDataSourceInfo(conf, e);
                             } catch (IOException e) {
                                 e.printStackTrace();
                                 System.err.printf("!!! Data source %s: %s directory doesn't exists%n",
-                                        conf.sourceName(), e.getMessage());
-                                return StatusHelper.createFailedDataSourceMetrics(conf, e);
+                                        conf.pipelineName(), e.getMessage());
+                                return StatusHelper.createFailedDataSourceInfo(conf, e);
                             }
                         },
                         execService
@@ -99,7 +100,7 @@ public class FastFileExecutor {
         }
 
         System.out.println("All data source tasks completed or failed.");
-        return new ExecutionMetrics(Duration.between(executionStart, Instant.now()), List.copyOf(metrics));
+        return new ExecutionInfo(Duration.between(executionStart, Instant.now()), List.copyOf(metrics));
     }
 
 }

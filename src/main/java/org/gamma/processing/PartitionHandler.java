@@ -1,10 +1,11 @@
 package org.gamma.processing;
 
-import org.gamma.config.YamlSourceConfigAdapter;
-import org.gamma.metrics.BatchMetrics;
-import org.gamma.metrics.StatusHelper;
-import org.gamma.metrics.PartitionMetrics;
+import org.gamma.config.EtlPipelineItem;
+import org.gamma.config.SourceItem;
+import org.gamma.metrics.BatchInfo;
+import org.gamma.metrics.PartitionInfo;
 import org.gamma.metrics.Status;
+import org.gamma.metrics.StatusHelper;
 import org.gamma.util.ConcurrencyUtils;
 import org.gamma.util.Utils;
 
@@ -23,11 +24,11 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public class PartitionHandler {
 
-    private final YamlSourceConfigAdapter config;
+    private final EtlPipelineItem config;
     private final String partitionId;
     private final Path path;
 
-    public PartitionHandler(YamlSourceConfigAdapter config, String partitionId, Path path) {
+    public PartitionHandler(EtlPipelineItem config, String partitionId, Path path) {
         this.config = Objects.requireNonNull(config);
         this.partitionId = Objects.requireNonNull(partitionId);
         this.path = Objects.requireNonNull(path);
@@ -38,39 +39,40 @@ public class PartitionHandler {
      * Processes the partition. This method is intended to be called asynchronously.
      * Handles internal exceptions and returns metrics.
      */
-    public PartitionMetrics handle(int partitionSize) {
+    public PartitionInfo handle(int partitionSize) {
         final Instant partitionStart = Instant.now();
         final String threadName = Thread.currentThread().getName();
-        System.out.printf("%n  Starting Partition %s for %s on T-%s%n", partitionId, config.sourceName(), threadName);
+        System.out.printf("%n  Starting Partition %s for %s on T-%s%n", partitionId, config.pipelineName(), threadName);
 
         List<List<Path>> batches;
+        SourceItem cnf = config.sources().getFirst();
         try {
-            batches = Utils.getFileBatches(path, config.fileFilter(), config.batchSize());
+            batches = Utils.getFileBatches(path, cnf.fileFilter(), cnf.batchSize());
             System.out.printf("    Partition %s: Found %d files matching '%s', distributed into %d batches (concurrency=%d).%n",
-                    partitionId, batches.stream().mapToInt(List::size).sum(), config.fileFilter(), batches.size(), config.maxConcurrency());
+                    partitionId, batches.stream().mapToInt(List::size).sum(), cnf.fileFilter(), batches.size(), cnf.numThreads());
         } catch (IOException e) {
             System.err.printf("!!! FATAL: Failed to list/batch files for Partition %s: %s%n", partitionId, e.getMessage());
-            return StatusHelper.createFailedPartitionMetrics(config.sourceID(), partitionId, e);
+            return StatusHelper.createFailedPartitionInfo(cnf.sourceId(), partitionId, e);
         }
 
         if (batches.isEmpty()) {
             System.out.printf("    Partition %s: No matching files found to process. Skipping.%n", partitionId);
-            return new PartitionMetrics(config.sourceID(), partitionId, Status.PASS, Duration.ZERO, threadName, List.of());
+            return new PartitionInfo(cnf.sourceId(), partitionId, Status.PASS, Duration.ZERO, threadName, List.of());
         }
 
-        List<BatchMetrics> results;
+        List<BatchInfo> results;
         Status status;
         int expectedBatchCount = batches.size();
 
         int threads;
         if (partitionSize == 1) // in case files are not separated in directories for parallel execution. running each bucket as partition,
-            threads = config.maxConcurrency();
+            threads = cnf.numThreads();
         else
             threads = 1; // as partitions are executed in parallel, let buckets run one by one
 
         ThreadFactory factory = ConcurrencyUtils.createPlatformThreadFactory(threadName.replace("-Part-", "-Batch-") + "-");
         ExecutorService service = Executors.newFixedThreadPool(threads, factory);
-        List<CompletableFuture<BatchMetrics>> futures = new ArrayList<>();
+        List<CompletableFuture<BatchInfo>> futures = new ArrayList<>();
         AtomicInteger batchCounter = new AtomicInteger(1);
 
         try {
@@ -79,11 +81,11 @@ public class PartitionHandler {
                     expectedBatchCount--; // Adjust count if a batch was unexpectedly empty
                     continue;
                 }
-                int batchId = batchCounter.getAndIncrement();
+                String batchId = "" + batchCounter.getAndIncrement();
 
                 BatchHandler processor = new BatchHandler(config);
 
-                CompletableFuture<BatchMetrics> batchFuture = null;
+                CompletableFuture<BatchInfo> batchFuture = null;
                 try {
                     batchFuture = processor.handle(batchId, batch, service);
                 } catch (IOException e) {
@@ -103,7 +105,7 @@ public class PartitionHandler {
             ConcurrencyUtils.shutdownExecutorService(service, partitionId + "-BatchExecutor");
         }
 
-        System.out.printf("  Finished Partition %s for Source %s%n", partitionId, config.sourceID());
+        System.out.printf("  Finished Partition %s for Source %s%n", partitionId, cnf.sourceId());
         // Determine if there was an overall failure not captured by individual batch metrics (e.g., executor issue)
         Throwable failureCause = (status == Status.FAIL && results.stream().noneMatch(b -> b.status() == Status.FAIL))
                 ? new RuntimeException("Partition failed due to incomplete batch processing.")
@@ -113,12 +115,12 @@ public class PartitionHandler {
         if (status == Status.FAIL && failureCause == null) {
             failureCause = results.stream()
                     .filter(b -> b.status() == Status.FAIL && b.failureCause() != null)
-                    .map(BatchMetrics::failureCause)
+                    .map(BatchInfo::failureCause)
                     .findFirst()
                     .orElse(null); // Or keep the generic message above
         }
 
-        return new PartitionMetrics(config.sourceID(), partitionId, status, Duration.between(partitionStart,
+        return new PartitionInfo(cnf.sourceId(), partitionId, status, Duration.between(partitionStart,
                 Instant.now()), threadName, List.copyOf(results), failureCause);
     }
 }

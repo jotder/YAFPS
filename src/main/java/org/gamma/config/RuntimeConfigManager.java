@@ -12,48 +12,18 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicBoolean; // Added for moved records
-import java.util.concurrent.atomic.AtomicInteger; // Added for moved records
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 // --- RuntimeConfigManager (Adapted for split config) ---
 public class RuntimeConfigManager {
 
-    // --- Moved Runtime State Records ---
-    public static record SourceRuntimeState(String sourceId, AtomicInteger currentNumThreads, AtomicInteger currentBatchSize,
-                                            AtomicBoolean currentActive) {
-        public SourceRuntimeState(SourceItem sourceConfig) { // Takes simplified SourceItem
-            this(sourceConfig.sourceId(), new AtomicInteger(sourceConfig.numThreads() != null ? sourceConfig.numThreads() : 1),
-                    new AtomicInteger(sourceConfig.batchSize() != null ? sourceConfig.batchSize() : 10),
-                    new AtomicBoolean(sourceConfig.active()));
-        }
-    }
-
-    public static record PipelineRuntimeState(String pipelineName, AtomicBoolean currentActive,
-                                Map<String, SourceRuntimeState> sourceStates, AutoTuningConfig tuningConfig,
-                                PipelineDetailsConfig detailsConfig, // These are top-level records in this package
-                                Map<String, AtomicInteger> ruleConsecutiveBreaches, long pipelineCooldownUntilTimestamp) {
-        public PipelineRuntimeState(EtlPipelineItem pipelineConfig, PipelineDetailsConfig detailsConfig) {
-            this(pipelineConfig.pipelineName(), new AtomicBoolean(pipelineConfig.active()),
-                    new ConcurrentHashMap<>(), pipelineConfig.autoTuning(), detailsConfig,
-                    new ConcurrentHashMap<>(), 0L);
-            if (pipelineConfig.sources() != null) {
-                for (SourceItem sourceCoreConfig : pipelineConfig.sources())
-                    this.sourceStates.put(sourceCoreConfig.sourceId(), new SourceRuntimeState(sourceCoreConfig));
-            }
-            if (this.tuningConfig != null && this.tuningConfig.tuningRules() != null) {
-                for (TuningRuleConfig rule : this.tuningConfig.tuningRules()) // TuningRuleConfig is a top-level record
-                    this.ruleConsecutiveBreaches.put(rule.ruleName(), new AtomicInteger(0));
-            }
-        }
-    }
-    // --- End of Moved Runtime State Records ---
-
     private static final Logger LOGGER = Logger.getLogger(RuntimeConfigManager.class.getName());
     private final AppConfig initialAppConfig;
+    // --- End of Moved Runtime State Records ---
     private final Map<String, PipelineRuntimeState> pipelineStates; // Key: pipelineName
-
     public RuntimeConfigManager(AppConfig initialAppConfig, Path configPath) throws IOException {
         this.initialAppConfig = Objects.requireNonNull(initialAppConfig);
         this.pipelineStates = new ConcurrentHashMap<>();
@@ -164,7 +134,6 @@ public class RuntimeConfigManager {
         return Optional.empty();
     }
 
-
     // --- Updaters for PerformanceTuner (largely unchanged, operate on runtime state) ---
     public synchronized void updatePipelineActiveStatus(String pipelineName, boolean newActiveStatus, String reason) {
         PipelineRuntimeState state = pipelineStates.get(pipelineName);
@@ -237,5 +206,38 @@ public class RuntimeConfigManager {
         } else
             LOGGER.warning("Attempted to update batchSize for pipeline without tuning config: " + pipelineName);
 
+    }
+
+    // --- Moved Runtime State Records ---
+    public static record SourceRuntimeState(String sourceId, AtomicInteger currentNumThreads,
+                                            AtomicInteger currentBatchSize,
+                                            AtomicBoolean currentActive) {
+        public SourceRuntimeState(SourceItem sourceConfig) { // Takes simplified SourceItem
+            this(sourceConfig.sourceId(), new AtomicInteger(sourceConfig.numThreads() != null ? sourceConfig.numThreads() : 1),
+                    new AtomicInteger(sourceConfig.batchSize() != null ? sourceConfig.batchSize() : 10),
+                    new AtomicBoolean(sourceConfig.active()));
+        }
+    }
+
+    public static record PipelineRuntimeState(String pipelineName, AtomicBoolean currentActive,
+                                              Map<String, SourceRuntimeState> sourceStates,
+                                              AutoTuningConfig tuningConfig,
+                                              PipelineDetailsConfig detailsConfig,
+                                              // These are top-level records in this package
+                                              Map<String, AtomicInteger> ruleConsecutiveBreaches,
+                                              long pipelineCooldownUntilTimestamp) {
+        public PipelineRuntimeState(EtlPipelineItem pipelineConfig, PipelineDetailsConfig detailsConfig) {
+            this(pipelineConfig.pipelineName(), new AtomicBoolean(pipelineConfig.active()),
+                    new ConcurrentHashMap<>(), pipelineConfig.autoTuning(), detailsConfig,
+                    new ConcurrentHashMap<>(), 0L);
+            if (pipelineConfig.sources() != null) {
+                for (SourceItem sourceCoreConfig : pipelineConfig.sources())
+                    this.sourceStates.put(sourceCoreConfig.sourceId(), new SourceRuntimeState(sourceCoreConfig));
+            }
+            if (this.tuningConfig != null && this.tuningConfig.tuningRules() != null) {
+                for (TuningRuleConfig rule : this.tuningConfig.tuningRules()) // TuningRuleConfig is a top-level record
+                    this.ruleConsecutiveBreaches.put(rule.ruleName(), new AtomicInteger(0));
+            }
+        }
     }
 }

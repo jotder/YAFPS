@@ -1,6 +1,8 @@
 package org.gamma.processing;
 
+import org.gamma.metrics.LoadingInfo;
 import org.gamma.metrics.MetricsManager;
+import org.gamma.metrics.Status;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 import java.time.Duration;
@@ -27,9 +29,9 @@ class LoadSimulatorTest {
 
         String targetTable = "test_table";
 
-        MetricsManager.LoadInfo loadInfo = LoadSimulator.simulateLoad(fileName, targetTable);
+        LoadingInfo loadInfo = LoadSimulator.simulateLoad(fileName, targetTable);
 
-        assertEquals(MetricsManager.Status.PASS, loadInfo.status(), "Load status should be PASS for successful simulation.");
+        assertEquals(Status.PASS, loadInfo.status(), "Load status should be PASS for successful simulation.");
         assertEquals(fileName, loadInfo.fileName());
         assertEquals(targetTable, loadInfo.targetTable());
         assertNull(loadInfo.failureCause(), "Failure cause should be null for successful load.");
@@ -57,8 +59,9 @@ class LoadSimulatorTest {
 
         String targetTable = "test_table_fail";
 
+        String finalFileName = fileName;
         RuntimeException exception = assertThrows(RuntimeException.class, () -> {
-            LoadSimulator.simulateLoad(fileName, targetTable);
+            LoadSimulator.simulateLoad(finalFileName, targetTable);
         });
 
         assertTrue(exception.getMessage().contains("Simulated DB error for " + fileName),

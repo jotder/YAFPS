@@ -2,7 +2,9 @@ package org.gamma.processing;
 
 import org.gamma.config.EtlPipelineItem;
 import org.gamma.config.SourceItem;
-import org.gamma.metrics.MetricsManager;
+import org.gamma.metrics.BatchInfo;
+import org.gamma.metrics.PartitionInfo;
+import org.gamma.metrics.Status;
 import org.gamma.util.ConcurrencyUtils;
 import org.gamma.util.FileUtils;
 import org.junit.jupiter.api.AfterEach;
@@ -12,26 +14,18 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
-// import org.mockito.InjectMocks; // Can be useful if not instantiating manually
 
 import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit; // For timeouts and awaitTermination
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyList;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.contains;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -63,9 +57,9 @@ class PartitionProcessorTest {
         // In this test setup, executors are mostly managed within try-with-resources for MockedStatic or locally.
     }
 
-    private MetricsManager.BatchInfo createMockBatchInfo(int id, MetricsManager.Status status) {
-        return new MetricsManager.BatchInfo(id, "Batch-" + id, status, Duration.ofMillis(20), "thread-batch",
-                status == MetricsManager.Status.FAIL ? new Throwable("Simulated batch fail for id " + id) : null,
+    private BatchInfo createMockBatchInfo(String id, Status status) {
+        return new BatchInfo(id, "Batch-" + id, status, Duration.ofMillis(20), "thread-batch",
+                status == Status.FAIL ? new Throwable("Simulated batch fail for id " + id) : null,
                 Collections.emptyList());
     }
 
@@ -75,32 +69,32 @@ class PartitionProcessorTest {
         List<Path> filesInBatch2 = List.of(Paths.get("f3.txt"));
         List<List<Path>> fileBatches = List.of(filesInBatch1, filesInBatch2);
 
-        MetricsManager.BatchInfo batchInfo1 = createMockBatchInfo(1, MetricsManager.Status.PASS);
-        MetricsManager.BatchInfo batchInfo2 = createMockBatchInfo(2, MetricsManager.Status.PASS);
+        BatchInfo batchInfo1 = createMockBatchInfo("" + 1, Status.PASS);
+        BatchInfo batchInfo2 = createMockBatchInfo("" + 2, Status.PASS);
 
         try (MockedStatic<FileUtils> mockedFileUtils = mockStatic(FileUtils.class);
              MockedStatic<ConcurrencyUtils> mockedConcurrencyUtils = mockStatic(ConcurrencyUtils.class)) {
 
             mockedFileUtils.when(() -> FileUtils.getFileBatches(eq(testPartitionPath), eq(mockConfig)))
-                           .thenReturn(fileBatches);
+                    .thenReturn(fileBatches);
 
             // Mock the behavior of ConcurrencyUtils.waitForCompletableFuturesAndCollect
             // This is key to controlling the "outcome" of the batch processing stage from PartitionProcessor's view
             mockedConcurrencyUtils.when(() -> ConcurrencyUtils.waitForCompletableFuturesAndCollect(eq("Batch"), anyList(), eq(testPartitionId)))
-                               .thenAnswer(invocation -> {
-                                   // We expect two futures to be passed in a real scenario.
-                                   // Here, we directly return the results those futures would have produced.
-                                   return List.of(batchInfo1, batchInfo2);
-                               });
+                    .thenAnswer(invocation -> {
+                        // We expect two futures to be passed in a real scenario.
+                        // Here, we directly return the results those futures would have produced.
+                        return List.of(batchInfo1, batchInfo2);
+                    });
 
             mockedConcurrencyUtils.when(() -> ConcurrencyUtils.createPlatformThreadFactory(anyString())).thenReturn(Executors.defaultThreadFactory());
             mockedConcurrencyUtils.when(() -> ConcurrencyUtils.shutdownExecutorService(any(ExecutorService.class), anyString())).thenAnswer(inv -> null);
 
 
             PartitionProcessor processor = new PartitionProcessor(mockConfig, testPartitionId, testPartitionPath);
-            MetricsManager.PartitionInfo partitionInfo = processor.processPartition();
+            PartitionInfo partitionInfo = processor.processPartition();
 
-            assertEquals(MetricsManager.Status.PASS, partitionInfo.status());
+            assertEquals(Status.PASS, partitionInfo.status());
             assertEquals(testPartitionId, partitionInfo.partitionId());
             assertEquals(2, partitionInfo.batchMetrics().size());
             assertNull(partitionInfo.failureCause());
@@ -118,12 +112,12 @@ class PartitionProcessorTest {
         IOException ioException = new IOException("Failed to list files");
         try (MockedStatic<FileUtils> mockedFileUtils = mockStatic(FileUtils.class)) {
             mockedFileUtils.when(() -> FileUtils.getFileBatches(eq(testPartitionPath), eq(mockConfig)))
-                           .thenThrow(ioException);
+                    .thenThrow(ioException);
 
             PartitionProcessor processor = new PartitionProcessor(mockConfig, testPartitionId, testPartitionPath);
-            MetricsManager.PartitionInfo partitionInfo = processor.processPartition();
+            PartitionInfo partitionInfo = processor.processPartition();
 
-            assertEquals(MetricsManager.Status.FAIL, partitionInfo.status());
+            assertEquals(Status.FAIL, partitionInfo.status());
             assertNotNull(partitionInfo.failureCause());
             assertSame(ioException, partitionInfo.failureCause());
         }
@@ -133,15 +127,15 @@ class PartitionProcessorTest {
     void testProcessPartition_noFilesFound() throws Exception {
         try (MockedStatic<FileUtils> mockedFileUtils = mockStatic(FileUtils.class);
              MockedStatic<ConcurrencyUtils> mockedConcurrencyUtils = mockStatic(ConcurrencyUtils.class)
-             ) {
+        ) {
 
             mockedFileUtils.when(() -> FileUtils.getFileBatches(eq(testPartitionPath), eq(mockConfig)))
-                           .thenReturn(Collections.emptyList()); // No files found
+                    .thenReturn(Collections.emptyList()); // No files found
 
             PartitionProcessor processor = new PartitionProcessor(mockConfig, testPartitionId, testPartitionPath);
-            MetricsManager.PartitionInfo partitionInfo = processor.processPartition();
+            PartitionInfo partitionInfo = processor.processPartition();
 
-            assertEquals(MetricsManager.Status.PASS, partitionInfo.status(), "Status should be PASS if no files are found (not an error).");
+            assertEquals(Status.PASS, partitionInfo.status(), "Status should be PASS if no files are found (not an error).");
             assertTrue(partitionInfo.batchMetrics().isEmpty(), "Batch metrics should be empty.");
             assertNull(partitionInfo.failureCause());
 
@@ -156,27 +150,27 @@ class PartitionProcessorTest {
     @Test
     void testProcessPartition_oneBatchFails() throws Exception {
         List<List<Path>> fileBatches = List.of(List.of(Paths.get("f1.txt"))); // One batch
-        MetricsManager.BatchInfo failingBatchInfo = createMockBatchInfo(1, MetricsManager.Status.FAIL);
+        BatchInfo failingBatchInfo = createMockBatchInfo("" + 1, Status.FAIL);
 
         try (MockedStatic<FileUtils> mockedFileUtils = mockStatic(FileUtils.class);
              MockedStatic<ConcurrencyUtils> mockedConcurrencyUtils = mockStatic(ConcurrencyUtils.class)) {
 
             mockedFileUtils.when(() -> FileUtils.getFileBatches(eq(testPartitionPath), eq(mockConfig)))
-                           .thenReturn(fileBatches);
+                    .thenReturn(fileBatches);
 
             mockedConcurrencyUtils.when(() -> ConcurrencyUtils.waitForCompletableFuturesAndCollect(eq("Batch"), anyList(), eq(testPartitionId)))
-                               .thenReturn(List.of(failingBatchInfo)); // Simulate one failing batch result
+                    .thenReturn(List.of(failingBatchInfo)); // Simulate one failing batch result
 
             mockedConcurrencyUtils.when(() -> ConcurrencyUtils.createPlatformThreadFactory(anyString())).thenReturn(Executors.defaultThreadFactory());
             mockedConcurrencyUtils.when(() -> ConcurrencyUtils.shutdownExecutorService(any(ExecutorService.class), anyString())).thenAnswer(inv -> null);
 
 
             PartitionProcessor processor = new PartitionProcessor(mockConfig, testPartitionId, testPartitionPath);
-            MetricsManager.PartitionInfo partitionInfo = processor.processPartition();
+            PartitionInfo partitionInfo = processor.processPartition();
 
-            assertEquals(MetricsManager.Status.FAIL, partitionInfo.status());
+            assertEquals(Status.FAIL, partitionInfo.status());
             assertEquals(1, partitionInfo.batchMetrics().size());
-            assertEquals(MetricsManager.Status.FAIL, partitionInfo.batchMetrics().getFirst().status());
+            assertEquals(Status.FAIL, partitionInfo.batchMetrics().getFirst().status());
             assertNotNull(partitionInfo.batchMetrics().getFirst().failureCause(), "Failure cause for the batch should be set.");
         }
     }

@@ -10,7 +10,6 @@ import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class BatchMergeSplitWriter {
-//    String dataSource;
     Path outputDir;
     String mode;
     boolean keepHeader;
@@ -19,6 +18,7 @@ public class BatchMergeSplitWriter {
     Map<String, MergedFileWriter> partitionWriters = new HashMap<>();
     Set<String> fileNamePartition = new TreeSet<>();
     Path srcFile;
+    Map<String, List<String>> fileNamePartitions = new HashMap<>();
     private String mergedFileName;
 
     public BatchMergeSplitWriter(Path outDir, String mergedFileName, List<String> headerFields, String mode, boolean keepHeader) {
@@ -87,7 +87,8 @@ public class BatchMergeSplitWriter {
                             writerx.close();
                             closedCount.getAndIncrement();
                         } catch (IOException e) {
-                            String errorMsg = String.format("Error closing writer for partition (%s): %s", writerx.getmFlePath().getFileName(), e.getMessage());
+                            String errorMsg = String.format("Error closing writer for partition (%s): %s",
+                                    writerx.getmFlePath().getFileName(), e.getMessage());
                             closeErrors.add(errorMsg);
                         }
                     }
@@ -107,7 +108,8 @@ public class BatchMergeSplitWriter {
                         writer.close();
                         closedCount.getAndIncrement();
                     } catch (IOException e) {
-                        String errorMsg = String.format("Error closing writer for partition (%s): %s", writer.getmFlePath().getFileName(), e.getMessage());
+                        String errorMsg = String.format("Error closing writer for partition (%s): %s",
+                                writer.getmFlePath().getFileName(), e.getMessage());
                         closeErrors.add(errorMsg);
                     }
                 }
@@ -131,8 +133,6 @@ public class BatchMergeSplitWriter {
         System.out.println(x);
         return x;
     }
-
-    Map<String, List<String>> fileNamePartitions = new HashMap<>();
 
     private List<String> getPartitionNames(String sFileName) {
         return fileNamePartitions.get(sFileName);

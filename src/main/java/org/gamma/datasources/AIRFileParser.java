@@ -1,13 +1,16 @@
 package org.gamma.datasources;
 
-import org.gamma.config.YamlSourceConfigAdapter;
-import org.gamma.metrics.FileInfo; // Added import
-import org.gamma.processing.AbstractBatchFileParser; // Changed import
+import org.gamma.config.EtlPipelineItem;
+import org.gamma.config.SourceConfig;
+import org.gamma.metrics.FileInfo;
+import org.gamma.metrics.Status;
+import org.gamma.processing.AbstractBatchFileParser;
 import org.gamma.processing.StatusWriter;
+import org.gamma.util.Utils;
 
 import java.io.IOException;
-import java.sql.Timestamp; // Added import
 import java.nio.file.Path;
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -22,23 +25,26 @@ import java.util.Map;
  */
 public class AIRFileParser extends AbstractBatchFileParser { // Changed superclass
 
-    DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-    DateTimeFormatter eventDateFmt = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+    // Keep simulation constants here or move to a dedicated SimulationConfig class
+    private static final int SIMULATED_LOAD_FAILURE_MODULO = 100;
+    private static final Duration SIMULATED_LOAD_DURATION = Duration.ofMillis(1500);
     protected StatusWriter statusHandler;
-
-    public AIRFileParser(YamlSourceConfigAdapter config) throws IOException {
-        super(config);
-        // Explicitly use super to access logger if there's any doubt,
-        // or assign directly if it's confirmed protected and accessible.
-        // this.logger should work if protected and in superclass.
-        this.logger = super.configureLogger(config.sourceName() + "LOG_FILE"); // or FileParser.super.configureLogger
-        this.statusHandler = new StatusWriter(config.fileInfo(), config.routeInfo(), this.logger);
-    }
+    DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     // Removed duplicate getStatusHandler. The @Override one below is correct.
     // public synchronized StatusWriter getStatusHandler() {
     //     return this.statusHandler;
     // }
+    DateTimeFormatter eventDateFmt = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+
+    public AIRFileParser(EtlPipelineItem config) throws IOException {
+        super(config);
+        // Explicitly use super to access logger if there's any doubt,
+        // or assign directly if it's confirmed protected and accessible.
+        // this.logger should work if protected and in superclass.
+        this.logger = super.configureLogger(config.pipelineName() + "LOG_FILE"); // or FileParser.super.configureLogger
+        this.statusHandler = new StatusWriter(config.statusDir(), config.fileInfoTable(), config.routeInfoTable(), this.logger);
+    }
 
     @Override
     public StatusWriter getStatusHandler() { // Removed synchronized
@@ -51,10 +57,6 @@ public class AIRFileParser extends AbstractBatchFileParser { // Changed supercla
         String n2 = paths.getLast().toFile().getName().split("_")[2];
         return n1[0] + "_" + n1[1] + "_" + n1[2] + ".." + n2 + "_" + n1[3].substring(0, n1[3].indexOf(".")) + ".csv";
     }
-
-    // Keep simulation constants here or move to a dedicated SimulationConfig class
-    private static final int SIMULATED_LOAD_FAILURE_MODULO = 100;
-    private static final Duration SIMULATED_LOAD_DURATION = Duration.ofMillis(1500);
 
 
 //    public Map<String, Object> enrich(List<String> fields, long recIndex, String fileName) throws Exception {
@@ -91,7 +93,7 @@ public class AIRFileParser extends AbstractBatchFileParser { // Changed supercla
         return "";
     }
 
-//    public FileInfo parseFile(Path filePath) throws InterruptedException {
+    //    public FileInfo parseFile(Path filePath) throws InterruptedException {
 //        final String stageName = "Parsing " + Paths.get(filePath.toString()).getFileName() + " to ";
 //
 //        final Instant loadStart = Instant.now();
@@ -103,29 +105,27 @@ public class AIRFileParser extends AbstractBatchFileParser { // Changed supercla
 //            if (filePath.hashCode() % SIMULATED_LOAD_FAILURE_MODULO == 0)
 //                throw new RuntimeException("Simulated DB connection error for " + filePath);
 //
-////            String fileID, String dataSource, String fileName, long fileSize, Timestamp lastModTs,
-////                    String sourceFileUrl, long recCount, long failCount, String fileType, String task, Timestamp startTs,
-////            long duration, String recordStart, String recordEnd, String message
+//            String fileID, String dataSource, String fileName, long fileSize, Timestamp lastModTs,
+//                    String sourceFileUrl, long recCount, long failCount, String fileType, String task, Timestamp startTs,
+//            long duration, String recordStart, String recordEnd, String message
 //
-////            System.out.printf("        -> %s completed successfully on %s%n", stageName, threadName);
+//            System.out.printf("        -> %s completed successfully on %s%n", stageName, threadName);
 //            String fileName = filePath.toFile().getName();
 //            return new FileInfo(Utils.getFileID(config.sourceName(), fileName), config.sourceName(), fileName, filePath.toFile().length(),
 //                    Timestamp.from(Instant.ofEpochMilli(filePath.toFile().lastModified())),
 //                    filePath.toString(), 0, 0, "SOURCE", "PARSE", Timestamp.from(Instant.ofEpochMilli(Instant.now().toEpochMilli())),
 //                    0, "recordStart", "recordEnd", null);
 //        } catch (InterruptedException e) {
-////            System.err.printf("          INTERRUPTED during %s on %s%n", stageName, threadName);
+//            System.err.printf("          INTERRUPTED during %s on %s%n", stageName, threadName);
 //            Thread.currentThread().interrupt();
 //            throw e;
 //        } catch (RuntimeException e) {
-
-    /// /            System.err.printf("          ERROR during %s on %s: %s%n", stageName, threadName, e.getMessage());
+//            System.err.printf("          ERROR during %s on %s: %s%n", stageName, threadName, e.getMessage());
 //            // Let BatchProcessor handle creating failed metrics from the exception
 //            throw e;
 //        }
 //        // No need to return failed metrics here, exception propagation handles it.
 //    }
-
     @Override // Uncommented and added Override
     public FileInfo parseFile(Path filePath) throws InterruptedException {
         final String stageName = "Parsing " + filePath.getFileName() + " to "; // Simplified Paths.get().getFileName()
@@ -140,11 +140,12 @@ public class AIRFileParser extends AbstractBatchFileParser { // Changed supercla
                 throw new RuntimeException("Simulated DB connection error for " + filePath);
 
             String fileName = filePath.toFile().getName();
-            // Assuming FileInfo is org.gamma.metrics.FileInfo
+            // Assuming FileInfo is FileInfo
             // Ensure constructor matches or adapt
-            return new org.gamma.metrics.FileInfo(
-                    org.gamma.util.Utils.getFileID(config.sourceName(), fileName), // fileID
-                    config.sourceName(), // dataSource
+
+            return new FileInfo(
+                    Utils.getFileID(config.sourceId(), fileName), // fileID
+                    config.sourceId(), // dataSource
                     fileName, // fileName
                     filePath.toFile().length(), // fileSize
                     Timestamp.from(Instant.ofEpochMilli(filePath.toFile().lastModified())), // lastModTs
@@ -155,7 +156,7 @@ public class AIRFileParser extends AbstractBatchFileParser { // Changed supercla
                     "PARSE", // task
                     Timestamp.from(loadStart), // startTs
                     Duration.between(loadStart, Instant.now()).toMillis(), // duration
-                    org.gamma.metrics.Status.PASS, // status placeholder
+                    Status.PASS, // status placeholder
                     "recordStart_placeholder", // recordStart placeholder
                     "recordEnd_placeholder",   // recordEnd placeholder
                     null           // message
@@ -197,8 +198,8 @@ public class AIRFileParser extends AbstractBatchFileParser { // Changed supercla
 //        ) {
 //            Stream<String> lines = bufferedReader.lines();
 //            int headerLine = config.getHeaderLines(); // this.getHeaderLines(pollFileInf);
-//            Path errDir = config.getErrorDir(); // this.getProperties().getProperty("ERR_DIR");
-//            Path errFilePath = errDir.resolve(pollFileInf.fileName() + ".err.csv");
+//            Path errorDir = config.getErrorDir(); // this.getProperties().getProperty("ERR_DIR");
+//            Path errFilePath = errorDir.resolve(pollFileInf.fileName() + ".err.csv");
 //
 //            try (BufferedWriter errWriter = Files.newBufferedWriter(errFilePath)) {
 //                int lineCount = 0;
@@ -421,7 +422,5 @@ public class AIRFileParser extends AbstractBatchFileParser { // Changed supercla
         return LocalDateTime.ofInstant(Instant.ofEpochMilli(epochMillis), ZoneId.systemDefault());
     }
 
-
-//    Logger getLogger();
 }
     

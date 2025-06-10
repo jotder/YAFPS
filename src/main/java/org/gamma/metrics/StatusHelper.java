@@ -1,6 +1,7 @@
 package org.gamma.metrics;
 
-import org.gamma.config.YamlSourceConfigAdapter;
+import org.gamma.config.EtlPipelineItem;
+import org.gamma.config.SourceItem;
 import org.gamma.processing.MergedFileWriter;
 
 import java.io.File;
@@ -21,20 +22,24 @@ public final class StatusHelper {
 
     // --- Failure Metric Creators ---
 
-    public static DataSourceMetrics createFailedDataSourceMetrics(YamlSourceConfigAdapter conf, Throwable cause) {
-        return new DataSourceMetrics(conf.sourceID(), conf.sourceName(), Status.FAIL, Duration.ZERO, Thread.currentThread().getName(), List.of(), cause);
+    //    public static DataSourceInfo createFailedDataSourceMetrics(YamlSourceConfigAdapter conf, Throwable cause) {
+//        return new DataSourceInfo(conf.sourceID(), conf.sourceName(), Status.FAIL, Duration.ZERO, Thread.currentThread().getName(), List.of(), cause);
+//    }
+    public static DataSourceInfo createFailedDataSourceInfo(final EtlPipelineItem conf, final Throwable cause) {
+        SourceItem pollInf = conf.sources().getFirst();
+        return new DataSourceInfo(pollInf.sourceId(), conf.pipelineName(), Status.FAIL, Duration.ZERO, Thread.currentThread().getName(), List.of(), cause);
     }
 
-    public static PartitionMetrics createFailedPartitionMetrics(String sourceId, String partitionId, Throwable cause) {
-        return new PartitionMetrics(sourceId, partitionId, Status.FAIL, Duration.ZERO, Thread.currentThread().getName(), List.of(), cause);
+    public static PartitionInfo createFailedPartitionInfo(String sourceId, String partitionId, Throwable cause) {
+        return new PartitionInfo(sourceId, partitionId, Status.FAIL, Duration.ZERO, Thread.currentThread().getName(), List.of(), cause);
     }
 
-    public static BatchMetrics createFailedBatchMetrics(int batchId, String batchName, Throwable cause) {
-        return new BatchMetrics(batchId, batchName, Status.FAIL, Duration.ZERO, Thread.currentThread().getName(), cause, List.of());
+    public static BatchInfo createFailedBatchInfo(String batchId, String batchName, Throwable cause) {
+        return new BatchInfo(batchId, batchName, Status.FAIL, Duration.ZERO, Thread.currentThread().getName(), cause, List.of());
     }
 
-    public static LoadMetrics createFailedLoadMetrics(String fileName, String targetTable, Throwable cause) {
-        return new LoadMetrics(fileName, targetTable, Status.FAIL, Duration.ZERO, Thread.currentThread().getName(), cause);
+    public static LoadingInfo createFailedLoadInfo(String fileName, String targetTable, Throwable cause) {
+        return new LoadingInfo(fileName, targetTable, Status.FAIL, Duration.ZERO, Thread.currentThread().getName(), cause);
     }
 
     // --- Status Determination ---
@@ -82,7 +87,7 @@ public final class StatusHelper {
 
     public static FileInfo createMergedRecord(String dataSource, MergedFileWriter w) {
         File file = w.mFlePath.toFile();
-        String fileID = "",  fileName = file.getName();
+        String fileID = "", fileName = file.getName();
         long fileSize = file.length();
         Timestamp lastModTs = Timestamp.from(Instant.ofEpochSecond(file.lastModified()));
         String sourceFileUrl = w.mFlePath.toString();
@@ -102,7 +107,7 @@ public final class StatusHelper {
 
     }
 
-    public static FileInfo createFileInfo(Path path, String dataSource, long parseCount, long failCount, Timestamp  startTs, long duration,
+    public static FileInfo createFileInfo(Path path, String dataSource, long parseCount, long failCount, Timestamp startTs, long duration,
                                           Status status, String startRecord, String endRecord, String fileErrorMsg) {
         File file = path.toFile();
         String fileID = "", fileName = file.getName();

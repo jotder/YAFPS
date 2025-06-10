@@ -9,5 +9,14 @@
         <module name="YetAnotherFileProcessingSystem" />
       </profile>
     </annotationProcessing>
+    <bytecodeTargetLevel>
+      <module name="YAFPS" target="21" />
+    </bytecodeTargetLevel>
+  </component>
+  <component name="JavacSettings">
+    <option name="ADDITIONAL_OPTIONS_OVERRIDE">
+      <module name="YAFPS" options="--enable-preview" />
+      <module name="YetAnotherFileProcessingSystem" options="--enable-preview" />
+    </option>
   </component>
 </project>
