@@ -56,7 +56,8 @@ public class DataSourceProcessor {
         try {
             for (final Path partitionPath : partitionsToProcess) {
                 final String partitionId = partitionPath.getFileName() + "_" + partitionCounter.getAndIncrement();
-                partitionFutures.add(CompletableFuture.supplyAsync(
+                partitionFutures.add(CompletableFuture
+                        .supplyAsync(
                         () -> {
                             try {
                                 PartitionProcessor partitionProcessor = new PartitionProcessor(this.config, partitionId, partitionPath);

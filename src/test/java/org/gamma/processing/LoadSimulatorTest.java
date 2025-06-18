@@ -1,7 +1,6 @@
 package org.gamma.processing;
 
 import org.gamma.metrics.LoadingInfo;
-import org.gamma.metrics.MetricsManager;
 import org.gamma.metrics.Status;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;

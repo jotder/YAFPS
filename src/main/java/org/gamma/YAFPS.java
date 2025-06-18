@@ -3,6 +3,8 @@ package org.gamma;
 import org.gamma.config.AppConfig;
 import org.gamma.config.ConfigManager;
 import org.gamma.config.EtlPipelineItem;
+import org.gamma.config.SourceItem;
+import org.gamma.fake.DummyStudentGenerator;
 import org.gamma.metrics.*;
 import org.gamma.processing.DataSourceProcessor;
 import org.gamma.util.ConcurrencyUtils;
@@ -11,6 +13,7 @@ import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -45,6 +48,58 @@ public class YAFPS {
         }
     }
 
+
+    // --- Dummy Data Creation Helper ---
+    private static void createDummyData(List<EtlPipelineItem> configs) { // Parameter is List<EtlPipelineItem>
+        System.out.println("Creating dummy data directories/files for testing...");
+        for (EtlPipelineItem conf : configs) { // Iterates over EtlPipelineItem
+            SourceItem poll = conf.sources().getFirst(); //ToDo loop for multiple poll locations
+            Path sourcePath = poll.sourceDir();
+            try {
+                Files.createDirectories(sourcePath);
+                if (poll.useSubDirAsPartition()) {
+                    for (int p = 0; p <= 9; p++) {
+                        Path partPath = sourcePath.resolve("2025011" + p);
+                        Files.createDirectories(partPath);
+                        for (int f = 0; f <= 99; f++) {
+                            String filter = poll.fileFilter();
+                            String s = filter.contains("dat") ? ".dat" : filter.contains("txt") ? ".txt" : ".csv";
+                            Path filePath = partPath.resolve("file_" + f + s);
+                            if (!Files.exists(filePath))
+                                Files.createFile(filePath);
+                            populateRecords(filePath);
+                        }
+                    }
+
+                    if (poll.dirFilter() != null && !poll.dirFilter().equals("*")) {
+                        Path filePath = Files.createDirectories(sourcePath.resolve("ignored_partition"));
+                        populateRecords(filePath);
+                    }
+
+                } else {
+                    for (int f = 0; f <= 99; f++) {
+                        String ext = poll.fileFilter().contains("dat") ? ".dat" : (poll.fileFilter().contains("txt") ? ".txt" : ".csv");
+                        Path filePath = sourcePath.resolve("base_file_" + f + ext);
+                        if (!Files.exists(filePath)) Files.createFile(filePath);
+                        populateRecords(filePath);
+                    }
+                    if (!Files.exists(sourcePath.resolve("ignored_file.log"))) {
+                        Path filePath = Files.createFile(sourcePath.resolve("ignored_file.log"));
+                        populateRecords(filePath);
+                    }
+                }
+            } catch (IOException e) {
+                System.err.println("Warning: Could not create dummy data for " + poll.sourceDir() + ": " + e.getMessage());
+            }
+        }
+        System.out.println("Dummy data creation attempt finished.");
+    }
+
+    private static void populateRecords(Path filePath) throws IOException {
+        //Todo create dummy records
+        DummyStudentGenerator.generate(filePath);
+    }
+
     // --- Main Method ---
     public static void main(final String[] args) throws IOException {
 
@@ -60,7 +115,10 @@ public class YAFPS {
 
         AppConfig appConfig = ConfigManager.getConfig();
 
+//        createDummyData(appConfig.etlPipelines());
+
         final YAFPS executor = new YAFPS(appConfig); // Pass List<EtlPipelineItem>
+
 
         try {
             System.out.println("========================================================");
@@ -132,24 +190,25 @@ public class YAFPS {
         System.out.printf("Starting execution with %d concurrent data sources.%n", dataSourceConcurrency);
 
         try {
-            for (final EtlPipelineItem config : getSources()) {
-                final DataSourceProcessor processor = new DataSourceProcessor(config);
-                final CompletableFuture<DataSourceInfo> dataSourceFuture = CompletableFuture.supplyAsync(
-                        () -> {
-                            try {
-                                return processor.processDataSource();   // Call processDataSource on the DataSourceProcessor instance
-                            } catch (final RuntimeException e) {
-                                System.err.printf("!!! Uncaught RuntimeException processing data source %s: %s%n", config.pipelineName(), e.getMessage());
-                                e.printStackTrace(System.err);
-                                // Create failed metrics, consider moving this utility to MetricsManager or a shared helper
-                                return StatusHelper.createFailedDataSourceInfo(config, e);
-                            }
-                        },
-                        dataSourceExecutor
-                );
-                dataSourceFutures.add(dataSourceFuture);
+            for (EtlPipelineItem config : getSources()) {
+                if (config.active()) {
+                    final DataSourceProcessor processor = new DataSourceProcessor(config);
+                    final CompletableFuture<DataSourceInfo> dataSourceFuture = CompletableFuture.supplyAsync(
+                            () -> {
+                                try {
+                                    return processor.processDataSource();   // Call processDataSource on the DataSourceProcessor instance
+                                } catch (final RuntimeException e) {
+                                    System.err.printf("!!! Uncaught RuntimeException processing data source %s: %s%n", config.pipelineName(), e.getMessage());
+                                    e.printStackTrace(System.err);
+                                    // Create failed metrics, consider moving this utility to MetricsManager or a shared helper
+                                    return StatusHelper.createFailedDataSourceInfo(config, e);
+                                }
+                            },
+                            dataSourceExecutor
+                    );
+                    dataSourceFutures.add(dataSourceFuture);
+                }
             }
-
             List<DataSourceInfo> collectedResults = ConcurrencyUtils.waitForCompletableFuturesAndCollect(
                     "DataSource", dataSourceFutures, null);
             finalDataSourceMetrics = new CopyOnWriteArrayList<>(collectedResults);
